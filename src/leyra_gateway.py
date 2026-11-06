@@ -103,6 +103,38 @@ async def health() -> JSONResponse:
     )
 
 
+@router.get("/connection/test")
+async def test_provider_connection(request: Request) -> JSONResponse:
+    """Perform a real authenticated request to the configured provider's models endpoint."""
+    settings = get_settings()
+    authorize(request.headers.get("authorization"), settings.gateway_token)
+    timeout = httpx.Timeout(settings.timeout_seconds, connect=10.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            upstream = await client.get(
+                upstream_url(settings, "models"),
+                headers=upstream_headers(settings),
+            )
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="The model provider timed out.") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Could not reach the configured model provider.") from exc
+
+    if upstream.is_error:
+        # Do not relay provider bodies: they can contain account or infrastructure details.
+        raise HTTPException(
+            status_code=502,
+            detail=f"Provider connection failed with HTTP {upstream.status_code}. Check the provider URL and credential.",
+        )
+    return JSONResponse({
+        "service": "leyra-gateway",
+        "connection": "connected",
+        "provider_host": urlsplit(settings.upstream_base_url).hostname,
+        "models_endpoint_status": upstream.status_code,
+        "api_key_configured": bool(settings.upstream_api_key),
+    })
+
+
 @router.get("/v1/models")
 async def list_models(request: Request) -> Response:
     settings = get_settings()
