@@ -64,3 +64,37 @@ def test_gateway_router_is_mounted_under_leyra_prefix():
     assert "/leyra/health" in paths
     assert "/leyra/v1/models" in paths
     assert "/leyra/v1/chat/completions" in paths
+
+
+
+@pytest.mark.asyncio
+async def test_chat_endpoint_rejects_missing_bearer_token(monkeypatch):
+    import httpx
+    from src.leyra_gateway import app
+
+    monkeypatch.setenv("LEYRA_UPSTREAM_BASE_URL", "https://api.example.com/v1")
+    monkeypatch.setenv("LEYRA_GATEWAY_TOKEN", "expected-token")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/leyra/v1/chat/completions",
+            json={"model": "test-model", "messages": [{"role": "user", "content": "Hi"}]},
+        )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_chat_endpoint_rejects_missing_messages(monkeypatch):
+    import httpx
+    from src.leyra_gateway import app
+
+    monkeypatch.setenv("LEYRA_UPSTREAM_BASE_URL", "https://api.example.com/v1")
+    monkeypatch.setenv("LEYRA_GATEWAY_TOKEN", "expected-token")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/leyra/v1/chat/completions",
+            headers={"Authorization": "Bearer expected-token"},
+            json={"model": "test-model", "messages": []},
+        )
+    assert response.status_code == 400
