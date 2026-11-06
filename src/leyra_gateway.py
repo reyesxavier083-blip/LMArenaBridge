@@ -45,6 +45,10 @@ def get_settings() -> Settings:
             status_code=503,
             detail="Provider URL must use HTTPS (HTTP is allowed only for localhost).",
         )
+    try:
+        parsed.port
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail="Provider URL port is invalid.") from exc
     if not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise HTTPException(status_code=503, detail="Provider URL is invalid.")
 
@@ -163,9 +167,13 @@ async def chat_completions(request: Request) -> Response:
     settings = get_settings()
     authorize(request.headers.get("authorization"), settings.gateway_token)
 
-    body = await request.body()
-    if len(body) > MAX_REQUEST_BODY_BYTES:
-        raise HTTPException(status_code=413, detail="Request body exceeds the 2 MiB limit.")
+    # Read incrementally so oversized/chunked requests are rejected before
+    # buffering the entire body in memory.
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > MAX_REQUEST_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="Request body exceeds the 2 MiB limit.")
+        body.extend(chunk)
     try:
         payload = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
