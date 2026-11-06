@@ -5,10 +5,14 @@ Allows you to have a conversation with any model available through the bridge
 
 from openai import OpenAI
 import sys
+import os
 
 # Configuration
 BASE_URL = "http://localhost:8000/api/v1"
-API_KEY = "sk-lmab-50664b6f-87c7-4115-b630-eb38a9b55021"  # Replace with your API key
+API_KEY = os.getenv("LMARENA_API_KEY", "").strip()
+if not API_KEY:
+    print("Missing API key. Set the LMARENA_API_KEY environment variable.")
+    sys.exit(1)
 
 def list_available_models(client):
     """List all available models"""
