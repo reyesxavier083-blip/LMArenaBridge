@@ -106,3 +106,14 @@ def test_admin_login_and_role_protected_user_creation(client):
     assert denied.status_code == 403
     allowed = client.get("/leyra/core/agents", headers={"Authorization": "Bearer " + viewer_token})
     assert allowed.status_code == 200
+
+
+def test_model_routes_require_auth_and_report_unconfigured_provider(client, monkeypatch):
+    monkeypatch.delenv("LEYRA_UPSTREAM_BASE_URL", raising=False)
+    no_auth = client.get("/leyra/core/models")
+    assert no_auth.status_code == 401
+    unavailable = client.get("/leyra/core/models", headers=headers())
+    assert unavailable.status_code == 503
+    chat = client.post("/leyra/core/chat", headers=headers(),
+        json={"model": "example-model", "messages": [{"role": "user", "content": "Hola"}]})
+    assert chat.status_code == 503
