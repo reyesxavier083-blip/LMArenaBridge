@@ -222,3 +222,48 @@ def test_gateway_app_exposes_connection_test_route():
     assert "/leyra/connection/test" in paths
     assert "/leyra/v1/models" in paths
     assert "/leyra/v1/chat/completions" in paths
+
+
+def test_get_settings_rejects_invalid_provider_port(monkeypatch):
+    monkeypatch.setenv("LEYRA_UPSTREAM_BASE_URL", "https://api.example.com:bad/v1")
+    monkeypatch.setenv("LEYRA_GATEWAY_TOKEN", "test-token")
+    with pytest.raises(HTTPException) as error:
+        get_settings()
+    assert error.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_chat_endpoint_rejects_invalid_json(monkeypatch):
+    import httpx
+    from src.leyra_gateway import app
+
+    monkeypatch.setenv("LEYRA_UPSTREAM_BASE_URL", "https://api.example.com/v1")
+    monkeypatch.setenv("LEYRA_GATEWAY_TOKEN", "expected-token")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/leyra/v1/chat/completions",
+            headers={"Authorization": "Bearer expected-token"},
+            content=b"{not-json",
+        )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_chat_endpoint_rejects_more_than_100_messages(monkeypatch):
+    import httpx
+    from src.leyra_gateway import app
+
+    monkeypatch.setenv("LEYRA_UPSTREAM_BASE_URL", "https://api.example.com/v1")
+    monkeypatch.setenv("LEYRA_GATEWAY_TOKEN", "expected-token")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/leyra/v1/chat/completions",
+            headers={"Authorization": "Bearer expected-token"},
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Hi"}] * 101,
+            },
+        )
+    assert response.status_code == 413
