@@ -7,3 +7,8 @@ __pycache__/
 chrome_grecaptcha/
 grecaptcha/
 camoufox_fetch/
+
+# Local environment secrets
+.env
+.env.*
+!.env.example
