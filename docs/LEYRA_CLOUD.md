@@ -40,12 +40,15 @@ The application binds to 127.0.0.1:8000. Use a managed HTTPS reverse proxy befor
 
 - `GET /leyra/core/health` — health, storage and provider configuration status.
 - `GET /leyra/core/models` — list models from the configured OpenAI-compatible provider (viewer+).
+- `GET /leyra/core/memory/search?query=...` — retrieve relevant saved context (viewer+).
 - `POST /leyra/core/chat` — send a chat completion request to the configured provider (operator+).
 - `GET /leyra/core/agents` — registered agents (control token required).
 - `POST /leyra/core/tasks` — dispatch a task.
 - `POST /leyra/core/memory` and `GET /leyra/core/memory` — persistent memory.
 - `GET /leyra/core/audit` — audit events.
 - Existing provider gateway: `/leyra/health`, `/leyra/connection/test`, `/leyra/v1/*`.
+
+Chat requests retrieve up to 10 relevant records from the selected memory namespace by keyword overlap and add them as contextual system information. Disable retrieval with `use_memory: false` when needed. This is lightweight lexical retrieval, not vector/embedding search.
 
 The model engine uses `LEYRA_UPSTREAM_BASE_URL` and `LEYRA_UPSTREAM_API_KEY` to call an explicitly configured OpenAI-compatible HTTPS endpoint. It does not hardcode a provider or expose provider credentials to clients. The provider must implement `/models` and `/chat/completions`.
 
