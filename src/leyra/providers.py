@@ -9,6 +9,7 @@ class ModelProvider:
     def __init__(self) -> None:
         self.base_url = os.getenv("LEYRA_UPSTREAM_BASE_URL", "").strip().rstrip("/")
         self.api_key = os.getenv("LEYRA_UPSTREAM_API_KEY", "").strip()
+        self.embedding_model = os.getenv("LEYRA_EMBEDDING_MODEL", "").strip()
         try:
             self.timeout = float(os.getenv("LEYRA_UPSTREAM_TIMEOUT_SECONDS", "90"))
         except ValueError:
@@ -30,6 +31,29 @@ class ModelProvider:
         result = {"Accept": "application/json", "Content-Type": "application/json"}
         if self.api_key: result["Authorization"] = "Bearer " + self.api_key
         return result
+
+
+    async def embed(self, text: str) -> list[float] | None:
+        if not self.embedding_model or not self.configured():
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout, connect=10)) as client:
+                response = await client.post(
+                    self.base_url + "/embeddings",
+                    headers=self.headers(),
+                    json={"model": self.embedding_model, "input": text[:12000]},
+                )
+            response.raise_for_status()
+            payload = response.json()
+            vector = payload["data"][0]["embedding"]
+            if not isinstance(vector, list) or not vector or len(vector) > 10000:
+                return None
+            values = [float(value) for value in vector]
+            if not all(__import__("math").isfinite(value) for value in values):
+                return None
+            return values
+        except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError):
+            return None
 
     async def models(self) -> dict:
         self._require_config()
