@@ -67,7 +67,8 @@ class Storage:
     def _invalidate(self, namespace: str) -> None:
         if self.cache:
             try:
-                for key in self.cache.scan_iter(match=f"leyra:memory:{namespace}:*"):\n                    self.cache.delete(key)
+                for key in self.cache.scan_iter(match=f"leyra:memory:{namespace}:*"):
+                    self.cache.delete(key)
             except Exception:
                 pass
 
