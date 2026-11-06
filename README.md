@@ -215,3 +215,8 @@ Distribuido bajo la licencia MIT. Consulta [LICENSE](LICENSE).
 - [Repositorio](https://github.com/reyesxavier083-blip/LMArenaBridge)
 - [Incidencias](https://github.com/reyesxavier083-blip/LMArenaBridge/issues)
 - [Historial de cambios](https://github.com/reyesxavier083-blip/LMArenaBridge/commits/main)
+
+
+### Gateway LEYRA sin dependencias externas
+
+Si estás en Termux y no tienes Uvicorn instalado, el lanzador `./run_leyra.sh` ya utiliza el servidor de la biblioteca estándar de Python. No necesitas instalar FastAPI, Uvicorn ni HTTPX para este modo. Consulta [docs/LEYRA_STDLIB.md](docs/LEYRA_STDLIB.md) para la configuración y las pruebas. El modo principal de LMArena conserva sus dependencias habituales.
