@@ -182,3 +182,37 @@ def test_vector_memory_rejects_dimension_mismatch(tmp_path):
     result = storage.search_memory_vector([1.0, 0.0, 0.0], "semantic", 5,
                                           owner_id="user-a", model="test-model")
     assert result == []
+
+def test_long_term_memory_metadata_and_expiration(tmp_path):
+    from src.leyra.storage import Storage
+
+    storage = Storage(database_path=str(tmp_path / "long-term.sqlite3"))
+    ordinary = storage.save_memory("profile", "User likes concise answers",
+                                   owner_id="user-a", memory_type="preference", importance=5)
+    temporary = storage.save_memory("profile", "Temporary meeting context",
+                                    owner_id="user-a", memory_type="episodic",
+                                    importance=2, ttl_days=1)
+    items = storage.list_memory("profile", owner_id="user-a")
+    assert items[0]["id"] == ordinary
+    assert items[0]["memory_type"] == "preference"
+    assert items[0]["importance"] == 5
+    assert items[1]["id"] == temporary
+    assert items[1]["expires_at"] is not None
+
+    with storage.connect() as db:
+        db.execute("UPDATE memory SET expires_at = '2000-01-01T00:00:00+00:00' WHERE id = ?", (temporary,))
+    visible = storage.list_memory("profile", owner_id="user-a")
+    assert [item["id"] for item in visible] == [ordinary]
+    assert storage.search_memory("meeting context", "profile", owner_id="user-a") == []
+
+
+def test_memory_api_accepts_long_term_classification(client):
+    response = client.post("/leyra/core/memory", headers=headers(), json={
+        "namespace": "profile", "content": "Prefers short direct responses",
+        "memory_type": "preference", "importance": 5, "ttl_days": 365
+    })
+    assert response.status_code == 200
+    assert response.json()["memory_type"] == "preference"
+    items = client.get("/leyra/core/memory?namespace=profile", headers=headers()).json()["items"]
+    assert items[0]["memory_type"] == "preference"
+    assert items[0]["importance"] == 5
