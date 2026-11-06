@@ -38,12 +38,16 @@ The application binds to 127.0.0.1:8000. Use a managed HTTPS reverse proxy befor
 
 ## API
 
-- `GET /leyra/core/health` — health and storage status.
+- `GET /leyra/core/health` — health, storage and provider configuration status.
+- `GET /leyra/core/models` — list models from the configured OpenAI-compatible provider (viewer+).
+- `POST /leyra/core/chat` — send a chat completion request to the configured provider (operator+).
 - `GET /leyra/core/agents` — registered agents (control token required).
 - `POST /leyra/core/tasks` — dispatch a task.
 - `POST /leyra/core/memory` and `GET /leyra/core/memory` — persistent memory.
 - `GET /leyra/core/audit` — audit events.
 - Existing provider gateway: `/leyra/health`, `/leyra/connection/test`, `/leyra/v1/*`.
+
+The model engine uses `LEYRA_UPSTREAM_BASE_URL` and `LEYRA_UPSTREAM_API_KEY` to call an explicitly configured OpenAI-compatible HTTPS endpoint. It does not hardcode a provider or expose provider credentials to clients. The provider must implement `/models` and `/chat/completions`.
 
 The core also supports JWT login at `POST /leyra/core/auth/login`. Bootstrap the first administrator with `LEYRA_BOOTSTRAP_ADMIN_EMAIL` and `LEYRA_BOOTSTRAP_ADMIN_PASSWORD`; set a strong `LEYRA_JWT_SECRET`. Administrators create accounts with `POST /leyra/core/users`. Roles are `viewer`, `operator` and `admin`: viewers can inspect agents, operators can dispatch tasks and use memory, and admins can manage users and inspect audit events. Passwords are stored as PBKDF2-SHA256 hashes; access tokens expire after eight hours. The legacy `LEYRA_CONTROL_TOKEN` remains an admin-level emergency credential. Provider gateway authentication remains separate via `LEYRA_GATEWAY_TOKEN`.
 
