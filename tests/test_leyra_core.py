@@ -73,3 +73,16 @@ def test_combined_cloud_app_mounts_core_and_provider_gateway():
     assert "/leyra/v1/models" in paths
     assert "/leyra/v1/chat/completions" in paths
 \n
+
+
+def test_sqlite_storage_health_and_audit(client):
+    health = client.get("/leyra/core/health")
+    assert health.status_code == 200
+    assert health.json()["storage"] == {"database": "sqlite", "cache": "disabled"}
+
+    saved = client.post("/leyra/core/memory", headers=headers(),
+                        json={"namespace": "checks", "content": "persisted"})
+    assert saved.status_code == 200
+    audit = client.get("/leyra/core/audit", headers=headers())
+    assert audit.status_code == 200
+    assert audit.json()["events"][0]["event_type"] == "memory.write"
