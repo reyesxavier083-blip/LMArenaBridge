@@ -98,3 +98,21 @@ async def test_chat_endpoint_rejects_missing_messages(monkeypatch):
             json={"model": "test-model", "messages": []},
         )
     assert response.status_code == 400
+
+
+
+@pytest.mark.asyncio
+async def test_chat_endpoint_enforces_request_body_limit(monkeypatch):
+    import httpx
+    from src.leyra_gateway import app
+
+    monkeypatch.setenv("LEYRA_UPSTREAM_BASE_URL", "https://api.example.com/v1")
+    monkeypatch.setenv("LEYRA_GATEWAY_TOKEN", "expected-token")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/leyra/v1/chat/completions",
+            headers={"Authorization": "Bearer expected-token"},
+            content=b"x" * (2 * 1024 * 1024 + 1),
+        )
+    assert response.status_code == 413
