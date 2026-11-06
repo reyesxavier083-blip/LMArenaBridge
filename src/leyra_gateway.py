@@ -7,6 +7,7 @@ third-party session cookies.
 from __future__ import annotations
 
 import hmac
+import json
 import os
 from dataclasses import dataclass
 from typing import AsyncIterator
@@ -86,6 +87,8 @@ app = FastAPI(
     description="Provider-neutral, OpenAI-compatible gateway for LEYRA IA.",
 )
 router = APIRouter(prefix="/leyra", tags=["LEYRA IA"])
+MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024
+MAX_MESSAGES_PER_REQUEST = 100
 
 
 @router.get("/health")
@@ -128,9 +131,12 @@ async def chat_completions(request: Request) -> Response:
     settings = get_settings()
     authorize(request.headers.get("authorization"), settings.gateway_token)
 
+    body = await request.body()
+    if len(body) > MAX_REQUEST_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Request body exceeds the 2 MiB limit.")
     try:
-        payload = await request.json()
-    except Exception as exc:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=400, detail="Request body must be valid JSON.") from exc
 
     if not isinstance(payload, dict):
@@ -139,6 +145,8 @@ async def chat_completions(request: Request) -> Response:
         raise HTTPException(status_code=400, detail="A model name is required.")
     if not isinstance(payload.get("messages"), list) or not payload["messages"]:
         raise HTTPException(status_code=400, detail="At least one message is required.")
+    if len(payload["messages"]) > MAX_MESSAGES_PER_REQUEST:
+        raise HTTPException(status_code=413, detail="A maximum of 100 messages is allowed per request.")
 
     timeout = httpx.Timeout(settings.timeout_seconds, connect=10.0)
     client = httpx.AsyncClient(timeout=timeout)
