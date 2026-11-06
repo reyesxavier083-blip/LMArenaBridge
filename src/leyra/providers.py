@@ -9,7 +9,12 @@ class ModelProvider:
     def __init__(self) -> None:
         self.base_url = os.getenv("LEYRA_UPSTREAM_BASE_URL", "").strip().rstrip("/")
         self.api_key = os.getenv("LEYRA_UPSTREAM_API_KEY", "").strip()
-        self.timeout = float(os.getenv("LEYRA_UPSTREAM_TIMEOUT_SECONDS", "90"))
+        try:
+            self.timeout = float(os.getenv("LEYRA_UPSTREAM_TIMEOUT_SECONDS", "90"))
+        except ValueError:
+            self.timeout = 90.0
+        if not 5 <= self.timeout <= 300:
+            self.timeout = 90.0
 
     def configured(self) -> bool:
         if not self.base_url: return False
