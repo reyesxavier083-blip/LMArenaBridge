@@ -4961,4 +4961,4 @@ if __name__ == "__main__":
     print(f"🔐 Login: http://localhost:{PORT}/login")
     print(f"📚 API Base URL: http://localhost:{PORT}/api/v1")
     print("=" * 60)
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    # Bind to loopback by default; opt into LAN/public binding explicitly via HOST.\n    host = os.getenv("HOST", "127.0.0.1").strip() or "127.0.0.1"\n    print(f"🌐 Server bind address: {host}:{PORT}")\n    uvicorn.run(app, host=host, port=PORT)
