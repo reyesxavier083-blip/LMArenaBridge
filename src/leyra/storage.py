@@ -1,0 +1,296 @@
+"""Durable SQLite/PostgreSQL storage with optional Redis read cache."""
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+from datetime import timedelta
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except ImportError:  # SQLite-only development/test install
+    psycopg = None
+    dict_row = None
+
+try:
+    import redis
+except ImportError:
+    redis = None
+
+
+class Storage:
+    def __init__(self, database_path: str = "/data/leyra.sqlite3",
+                 database_url: str | None = None, redis_url: str | None = None) -> None:
+        self.database_url = (database_url or os.getenv("LEYRA_DATABASE_URL", "")).strip()
+        self.database_path = str(Path(database_path).expanduser())
+        self.backend = "postgresql" if self.database_url.startswith(("postgres://", "postgresql://")) else "sqlite"
+        if self.backend == "postgresql" and psycopg is None:
+            raise RuntimeError("PostgreSQL configured but psycopg is not installed")
+        self.cache = None
+        cache_url = (redis_url or os.getenv("LEYRA_REDIS_URL", "")).strip()
+        if cache_url and redis is not None:
+            self.cache = redis.Redis.from_url(cache_url, decode_responses=True,
+                                               socket_connect_timeout=2, socket_timeout=2)
+        if self.backend == "sqlite":
+            Path(self.database_path).parent.mkdir(parents=True, exist_ok=True)
+        self.initialize()
+
+    def connect(self):
+        if self.backend == "postgresql":
+            return psycopg.connect(self.database_url, row_factory=dict_row)
+        connection = sqlite3.connect(self.database_path, timeout=10)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _sql(self, query: str) -> str:
+        return query.replace("?", "%s") if self.backend == "postgresql" else query
+
+    def initialize(self) -> None:
+        with self.connect() as db:
+            if self.backend == "sqlite":
+                db.execute("PRAGMA journal_mode=WAL")
+                id_type = "INTEGER PRIMARY KEY AUTOINCREMENT"
+                json_type = "TEXT NOT NULL DEFAULT '{}'"
+            else:
+                id_type = "BIGSERIAL PRIMARY KEY"
+                json_type = "JSONB NOT NULL DEFAULT '{}'::jsonb"
+            db.execute(f"""CREATE TABLE IF NOT EXISTS memory (
+                id {id_type}, namespace TEXT NOT NULL, content TEXT NOT NULL,
+                metadata_json {json_type}, created_at TEXT NOT NULL, owner_id TEXT NOT NULL DEFAULT 'shared', memory_type TEXT NOT NULL DEFAULT 'semantic', importance INTEGER NOT NULL DEFAULT 3, expires_at TEXT)""")
+            if self.backend == "postgresql":
+                db.execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS owner_id TEXT NOT NULL DEFAULT 'shared'")
+                db.execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS memory_type TEXT NOT NULL DEFAULT 'semantic'")
+                db.execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS importance INTEGER NOT NULL DEFAULT 3")
+                db.execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS expires_at TEXT")
+            else:
+                columns = {row[1] for row in db.execute("PRAGMA table_info(memory)").fetchall()}
+                if "owner_id" not in columns:
+                    db.execute("ALTER TABLE memory ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'shared'")
+                if "memory_type" not in columns:
+                    db.execute("ALTER TABLE memory ADD COLUMN memory_type TEXT NOT NULL DEFAULT 'semantic'")
+                if "importance" not in columns:
+                    db.execute("ALTER TABLE memory ADD COLUMN importance INTEGER NOT NULL DEFAULT 3")
+                if "expires_at" not in columns:
+                    db.execute("ALTER TABLE memory ADD COLUMN expires_at TEXT")
+            db.execute("UPDATE memory SET owner_id = 'control-token' WHERE owner_id = 'shared'")
+            db.execute("""CREATE TABLE IF NOT EXISTS memory_embeddings (
+                memory_id BIGINT PRIMARY KEY, owner_id TEXT NOT NULL,
+                namespace TEXT NOT NULL, model TEXT NOT NULL,
+                vector_json TEXT NOT NULL, created_at TEXT NOT NULL)""")
+            db.execute(f"""CREATE TABLE IF NOT EXISTS audit_events (
+                id {id_type}, event_type TEXT NOT NULL, actor TEXT NOT NULL,
+                outcome TEXT NOT NULL, created_at TEXT NOT NULL)""")
+            db.execute(f"""CREATE TABLE IF NOT EXISTS users (
+                id {id_type}, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+                role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL)""")
+
+    def _invalidate(self, namespace: str, owner_id: str) -> None:
+        if self.cache:
+            try:
+                for key in self.cache.scan_iter(match=f"leyra:memory:{owner_id}:{namespace}:*"):
+                    self.cache.delete(key)
+            except Exception:
+                pass
+
+    def save_memory(self, namespace: str, content: str,
+                    metadata: dict[str, Any] | None = None, owner_id: str = "shared",
+                    memory_type: str = "semantic", importance: int = 3,
+                    ttl_days: int | None = None) -> int:
+        created = datetime.now(timezone.utc).isoformat()
+        payload = json.dumps(metadata or {}, ensure_ascii=False)
+        if memory_type not in {"episodic", "semantic", "preference", "procedural"}:
+            raise ValueError("Invalid memory type")
+        if not 1 <= int(importance) <= 5:
+            raise ValueError("Importance must be between 1 and 5")
+        if ttl_days is not None and not 1 <= int(ttl_days) <= 3650:
+            raise ValueError("ttl_days must be between 1 and 3650")
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=int(ttl_days))).isoformat() if ttl_days is not None else None
+        with self.connect() as db:
+            if self.backend == "postgresql":
+                row = db.execute(
+                    "INSERT INTO memory(namespace, content, metadata_json, created_at, owner_id, memory_type, importance, expires_at) "
+                    "VALUES (%s, %s, %s::jsonb, %s, %s, %s, %s, %s) RETURNING id",
+                    (namespace, content, payload, created, owner_id, memory_type, int(importance), expires_at)).fetchone()
+                memory_id = int(row["id"])
+            else:
+                cursor = db.execute(
+                    "INSERT INTO memory(namespace, content, metadata_json, created_at, owner_id, memory_type, importance, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (namespace, content, payload, created, owner_id, memory_type, int(importance), expires_at))
+                memory_id = int(cursor.lastrowid)
+        self._invalidate(namespace, owner_id)
+        return memory_id
+
+    def list_memory(self, namespace: str, limit: int = 50, owner_id: str = "shared") -> list[dict[str, Any]]:
+        bounded = max(1, min(limit, 200))
+        key = f"leyra:memory:{owner_id}:{namespace}:{bounded}"
+        if self.cache:
+            try:
+                cached = self.cache.get(key)
+                if cached:
+                    cached_items = json.loads(cached)
+                    now = datetime.now(timezone.utc).isoformat()
+                    return [item for item in cached_items
+                            if item.get("expires_at") is None or item["expires_at"] > now]
+            except Exception:
+                pass
+        with self.connect() as db:
+            rows = db.execute(self._sql(
+                "SELECT id, namespace, content, metadata_json, created_at, memory_type, importance, expires_at FROM memory "
+                "WHERE namespace = ? AND owner_id = ? AND (expires_at IS NULL OR expires_at > ?) ORDER BY importance DESC, id DESC LIMIT ?"),
+                (namespace, owner_id, datetime.now(timezone.utc).isoformat(), bounded)).fetchall()
+        items = []
+        for row in rows:
+            metadata = row["metadata_json"]
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+            items.append({"id": row["id"], "namespace": row["namespace"],
+                          "content": row["content"], "metadata": metadata,
+                          "created_at": row["created_at"], "memory_type": row["memory_type"],
+                          "importance": row["importance"], "expires_at": row["expires_at"]})
+        if self.cache:
+            try:
+                self.cache.setex(key, 60, json.dumps(items, ensure_ascii=False))
+            except Exception:
+                pass
+        return items
+
+    def search_memory(self, query: str, namespace: str = "general", limit: int = 5, owner_id: str = "shared") -> list[dict[str, Any]]:
+        """Return recent memory records ranked by simple token overlap."""
+        import re
+        tokens = list(dict.fromkeys(re.findall(r"[\w-]{2,}", query.lower())))[:12]
+        if not tokens:
+            return []
+        bounded = max(1, min(limit, 20))
+        clauses = " OR ".join(["LOWER(content) LIKE ?" for _ in tokens])
+        params = [namespace] + [f"%{token}%" for token in tokens]
+        with self.connect() as db:
+            rows = db.execute(self._sql(
+                "SELECT id, namespace, content, metadata_json, created_at, memory_type, importance, expires_at FROM memory "
+                "WHERE namespace = ? AND owner_id = ? AND (expires_at IS NULL OR expires_at > ?) AND (" + clauses + ") ORDER BY importance DESC, id DESC LIMIT 200"),
+                tuple([namespace, owner_id, datetime.now(timezone.utc).isoformat()] + params[1:])).fetchall()
+        ranked = []
+        for row in rows:
+            content = row["content"]
+            lowered = content.lower()
+            score = sum(lowered.count(token) for token in tokens)
+            metadata = row["metadata_json"]
+            if isinstance(metadata, str): metadata = json.loads(metadata)
+            ranked.append((score, {"id": row["id"], "namespace": row["namespace"],
+                "content": content, "metadata": metadata, "created_at": row["created_at"],
+                "memory_type": row["memory_type"], "importance": row["importance"], "expires_at": row["expires_at"]}))
+        ranked.sort(key=lambda item: (item[0], item[1]["id"]), reverse=True)
+        return [item[1] for item in ranked[:bounded]]
+
+
+    def save_embedding(self, memory_id: int, owner_id: str, namespace: str,
+                       model: str, vector: list[float]) -> None:
+        if not vector or len(vector) > 10000:
+            raise ValueError("Invalid embedding vector")
+        payload = json.dumps([float(value) for value in vector])
+        created = datetime.now(timezone.utc).isoformat()
+        with self.connect() as db:
+            db.execute(self._sql(
+                "INSERT INTO memory_embeddings(memory_id, owner_id, namespace, model, vector_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(memory_id) DO UPDATE SET "
+                "owner_id=excluded.owner_id, namespace=excluded.namespace, model=excluded.model, "
+                "vector_json=excluded.vector_json, created_at=excluded.created_at"),
+                (memory_id, owner_id, namespace, model, payload, created))
+
+    @staticmethod
+    def _cosine_similarity(left: list[float], right: list[float]) -> float:
+        if not left or len(left) != len(right):
+            return -2.0
+        dot = sum(a * b for a, b in zip(left, right))
+        left_norm = sum(a * a for a in left) ** 0.5
+        right_norm = sum(b * b for b in right) ** 0.5
+        if not left_norm or not right_norm:
+            return -1.0
+        return dot / (left_norm * right_norm)
+
+    def search_memory_vector(self, vector: list[float], namespace: str = "general",
+                             limit: int = 5, owner_id: str = "shared",
+                             model: str | None = None) -> list[dict[str, Any]]:
+        if not vector or len(vector) > 10000:
+            return []
+        bounded = max(1, min(limit, 20))
+        sql = ("SELECT m.id, m.namespace, m.content, m.metadata_json, m.created_at, m.memory_type, m.importance, m.expires_at, "
+               "e.vector_json, e.model FROM memory m JOIN memory_embeddings e ON e.memory_id=m.id "
+               "WHERE m.namespace = ? AND m.owner_id = ? AND e.owner_id = ? AND (m.expires_at IS NULL OR m.expires_at > ?)")
+        params: list[Any] = [namespace, owner_id, owner_id, datetime.now(timezone.utc).isoformat()]
+        if model:
+            sql += " AND e.model = ?"
+            params.append(model)
+        sql += " ORDER BY m.id DESC LIMIT 1000"
+        with self.connect() as db:
+            rows = db.execute(self._sql(sql), tuple(params)).fetchall()
+        ranked = []
+        for row in rows:
+            try:
+                stored = json.loads(row["vector_json"])
+                score = self._cosine_similarity(vector, stored)
+            except (ValueError, TypeError, KeyError):
+                continue
+            if score < 0:
+                continue
+            metadata = row["metadata_json"]
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+            item = {"id": row["id"], "namespace": row["namespace"],
+                    "content": row["content"], "metadata": metadata,
+                    "created_at": row["created_at"], "memory_type": row["memory_type"],
+                    "importance": row["importance"], "expires_at": row["expires_at"], "score": round(score, 6),
+                    "retrieval": "vector"}
+            ranked.append((score, item))
+        ranked.sort(key=lambda pair: (pair[0], pair[1]["id"]), reverse=True)
+        return [item for score, item in ranked[:bounded]]
+
+    def audit(self, event_type: str, actor: str, outcome: str) -> None:
+        created = datetime.now(timezone.utc).isoformat()
+        with self.connect() as db:
+            db.execute(self._sql(
+                "INSERT INTO audit_events(event_type, actor, outcome, created_at) VALUES (?, ?, ?, ?)"),
+                (event_type, actor, outcome, created))
+
+    def list_audit(self, limit: int = 50) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute(self._sql(
+                "SELECT event_type, actor, outcome, created_at FROM audit_events ORDER BY id DESC LIMIT ?"),
+                (max(1, min(limit, 200)),)).fetchall()
+        return [dict(row) for row in rows]
+
+    def create_user(self, email: str, password_hash: str, role: str) -> int:
+        created = datetime.now(timezone.utc).isoformat()
+        with self.connect() as db:
+            if self.backend == "postgresql":
+                row = db.execute(
+                    "INSERT INTO users(email, password_hash, role, created_at) VALUES (%s, %s, %s, %s) RETURNING id",
+                    (email.lower(), password_hash, role, created)).fetchone()
+                return int(row["id"])
+            cursor = db.execute(
+                "INSERT INTO users(email, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
+                (email.lower(), password_hash, role, created))
+            return int(cursor.lastrowid)
+
+    def get_user(self, email: str) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute(self._sql(
+                "SELECT id, email, password_hash, role, active FROM users WHERE email = ?"),
+                (email.lower(),)).fetchone()
+        return dict(row) if row else None
+
+    def health(self) -> dict[str, str]:
+        with self.connect() as db:
+            db.execute("SELECT 1")
+        cache_status = "disabled"
+        if self.cache:
+            try:
+                self.cache.ping()
+                cache_status = "ready"
+            except Exception:
+                cache_status = "unavailable"
+        return {"database": self.backend, "cache": cache_status}

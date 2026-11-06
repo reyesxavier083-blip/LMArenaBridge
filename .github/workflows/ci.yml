@@ -2,7 +2,7 @@ name: Continuous Integration
 
 on:
   push:
-    branches: [main, master, leyra-backend-foundation]
+    branches: [main, master, leyra-backend-foundation, leyra/cloud-foundation]
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -31,7 +31,7 @@ jobs:
           pip install -r requirements-leyra.txt pytest pytest-asyncio
 
       - name: Run LEYRA gateway tests
-        run: python -m pytest tests/test_leyra_gateway.py -v
+        run: python -m pytest tests/test_leyra_gateway.py tests/test_leyra_core.py -v
 
   build-and-test:
     name: Build and Test

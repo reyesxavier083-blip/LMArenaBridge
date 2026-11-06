@@ -1,0 +1,65 @@
+services:
+  leyra:
+    build:
+      context: .
+      dockerfile: Dockerfile.leyra
+    restart: unless-stopped
+    environment:
+      LEYRA_ENV: production
+      LEYRA_DATABASE_PATH: /data/leyra.sqlite3
+      LEYRA_DATABASE_URL: postgresql://leyra:${LEYRA_POSTGRES_PASSWORD:?Set LEYRA_POSTGRES_PASSWORD}@postgres:5432/leyra
+      LEYRA_REDIS_URL: redis://redis:6379/0
+      LEYRA_CONTROL_TOKEN: ${LEYRA_CONTROL_TOKEN:?Set LEYRA_CONTROL_TOKEN}
+      LEYRA_JWT_SECRET: ${LEYRA_JWT_SECRET:?Set LEYRA_JWT_SECRET}
+      LEYRA_BOOTSTRAP_ADMIN_EMAIL: ${LEYRA_BOOTSTRAP_ADMIN_EMAIL:-}
+      LEYRA_BOOTSTRAP_ADMIN_PASSWORD: ${LEYRA_BOOTSTRAP_ADMIN_PASSWORD:-}
+      LEYRA_UPSTREAM_BASE_URL: ${LEYRA_UPSTREAM_BASE_URL:?Set LEYRA_UPSTREAM_BASE_URL}
+      LEYRA_UPSTREAM_API_KEY: ${LEYRA_UPSTREAM_API_KEY:-}
+      LEYRA_GATEWAY_TOKEN: ${LEYRA_GATEWAY_TOKEN:?Set LEYRA_GATEWAY_TOKEN}
+      LEYRA_UPSTREAM_TIMEOUT_SECONDS: ${LEYRA_UPSTREAM_TIMEOUT_SECONDS:-90}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - leyra_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/leyra/core/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: leyra
+      POSTGRES_USER: leyra
+      POSTGRES_PASSWORD: ${LEYRA_POSTGRES_PASSWORD:?Set LEYRA_POSTGRES_PASSWORD}
+    volumes:
+      - leyra_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leyra -d leyra"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - leyra_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  leyra_data:
+  leyra_postgres:
+  leyra_redis:
