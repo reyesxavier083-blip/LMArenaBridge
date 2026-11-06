@@ -62,6 +62,7 @@ def test_gateway_router_is_mounted_under_leyra_prefix():
 
     paths = {route.path for route in router.routes}
     assert "/leyra/health" in paths
+    assert "/leyra/connection/test" in paths
     assert "/leyra/v1/models" in paths
     assert "/leyra/v1/chat/completions" in paths
 
@@ -194,3 +195,30 @@ async def test_connection_test_reports_provider_auth_failure(monkeypatch):
     assert response.status_code == 502
     assert "HTTP 401" in response.json()["detail"]
     assert "invalid_api_key" not in response.text
+
+
+def test_get_settings_rejects_invalid_timeout(monkeypatch):
+    monkeypatch.setenv("LEYRA_UPSTREAM_BASE_URL", "https://api.example.com/v1")
+    monkeypatch.setenv("LEYRA_GATEWAY_TOKEN", "test-token")
+    monkeypatch.setenv("LEYRA_UPSTREAM_TIMEOUT_SECONDS", "not-a-number")
+    with pytest.raises(HTTPException) as error:
+        get_settings()
+    assert error.value.status_code == 503
+
+
+def test_get_settings_rejects_provider_url_with_query(monkeypatch):
+    monkeypatch.setenv("LEYRA_UPSTREAM_BASE_URL", "https://api.example.com/v1?redirect=1")
+    monkeypatch.setenv("LEYRA_GATEWAY_TOKEN", "test-token")
+    with pytest.raises(HTTPException) as error:
+        get_settings()
+    assert error.value.status_code == 503
+
+
+def test_gateway_app_exposes_connection_test_route():
+    from src.leyra_gateway import app
+
+    paths = {route.path for route in app.routes}
+    assert "/leyra/health" in paths
+    assert "/leyra/connection/test" in paths
+    assert "/leyra/v1/models" in paths
+    assert "/leyra/v1/chat/completions" in paths
