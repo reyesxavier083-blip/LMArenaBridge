@@ -7,7 +7,7 @@ OpenAI-compatible interface.
 ## What is included
 
 - `src/leyra_gateway.py`: reusable FastAPI router with `/leyra/health`,
-  `/leyra/v1/models`, and `/leyra/v1/chat/completions` routes.
+  `/leyra/connection/test`, `/leyra/v1/models`, and `/leyra/v1/chat/completions` routes.
 - `src/main.py` mounts the router into the existing server, so no second server is
   required.
 - Streaming responses are forwarded as bytes so Server-Sent Events remain intact.
@@ -48,6 +48,22 @@ The existing server listens according to its own configuration. For development,
 keep it bound to loopback. Do not expose it publicly without TLS termination,
 network restrictions, secret rotation, monitoring, and rate limits.
 
+## Verify the real provider connection
+
+After setting the environment variables and starting the server, call the connection
+test. This makes a real authenticated GET request to the provider's `/models`
+endpoint; it does not simulate a connection.
+
+```bash
+curl -i "http://127.0.0.1:8000/leyra/connection/test" \
+  -H "Authorization: Bearer $LEYRA_GATEWAY_TOKEN"
+```
+
+A successful response includes `"connection": "connected"` and the provider host.
+HTTP 401/403 from the provider means its credential or access is not accepted;
+a timeout or network error means the server cannot reach the provider. The route
+does not reveal credentials or forward the provider's raw error body.
+
 ## LEYRA client connection
 
 Use base URL `http://127.0.0.1:8000/leyra/v1` (adjust host/port to match the
@@ -56,6 +72,7 @@ backend-controlled connection; do not embed the upstream provider key in an APK.
 
 ## Validation still required
 
-Run the repository test suite and static checks in CI. Verify non-streaming,
-streaming, authentication failures, timeout handling, provider errors, and model
-listing against a test provider before deployment.
+Run the repository test suite and static checks in CI. The connection-test route has
+mocked success and provider-auth-failure tests; a real deployment still requires
+valid provider credentials and a successful live call to `/leyra/connection/test`.
+Then verify non-streaming and streaming chat requests and model listing.
