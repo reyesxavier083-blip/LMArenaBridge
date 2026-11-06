@@ -44,9 +44,10 @@ export LEYRA_UPSTREAM_TIMEOUT_SECONDS="90"
 python -m src.main
 ```
 
-The existing server listens according to its own configuration. For development,
-keep it bound to loopback. Do not expose it publicly without TLS termination,
-network restrictions, secret rotation, monitoring, and rate limits.
+The main server binds to `127.0.0.1` by default. To intentionally expose it to
+other devices on a trusted LAN, set `HOST=0.0.0.0` before starting it; do not use
+that setting on an untrusted network. Do not expose it publicly without TLS
+termination, network restrictions, secret rotation, monitoring, and rate limits.
 
 ## OpenAI provider configuration
 
