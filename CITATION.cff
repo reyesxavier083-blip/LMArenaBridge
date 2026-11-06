@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "LMArenaBridge"
+abstract: >-
+  Python bridge that exposes an OpenAI-compatible API for interacting with
+  models available through LM Arena. Includes a standalone LEYRA gateway
+  configuration.
+version: 1.0.0
+date-released: 2026-11-06
+license: MIT
+repository-code: "https://github.com/reyesxavier083-blip/LMArenaBridge"
+keywords:
+  - Python
+  - FastAPI
+  - OpenAI-compatible API
+  - LM Arena
+  - API bridge
+  - LEYRA
