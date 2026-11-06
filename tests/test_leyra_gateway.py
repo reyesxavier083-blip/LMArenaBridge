@@ -116,3 +116,81 @@ async def test_chat_endpoint_enforces_request_body_limit(monkeypatch):
             content=b"x" * (2 * 1024 * 1024 + 1),
         )
     assert response.status_code == 413
+
+
+
+@pytest.mark.asyncio
+async def test_connection_test_reaches_configured_provider(monkeypatch):
+    import httpx
+    from src.leyra_gateway import app
+
+    monkeypatch.setenv("LEYRA_UPSTREAM_BASE_URL", "https://provider.example/v1")
+    monkeypatch.setenv("LEYRA_UPSTREAM_API_KEY", "provider-key")
+    monkeypatch.setenv("LEYRA_GATEWAY_TOKEN", "client-token")
+
+    real_async_client = httpx.AsyncClient
+
+    class FakeProviderClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, headers):
+            assert url == "https://provider.example/v1/models"
+            assert headers["Authorization"] == "Bearer provider-key"
+            return httpx.Response(200, json={"data": [{"id": "model-a"}]})
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeProviderClient)
+    transport = httpx.ASGITransport(app=app)
+    async with real_async_client(transport=transport, base_url="http://test") as client:
+        response = await client.get(
+            "/leyra/connection/test",
+            headers={"Authorization": "Bearer client-token"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["connection"] == "connected"
+    assert response.json()["provider_host"] == "provider.example"
+    assert response.json()["api_key_configured"] is True
+
+
+@pytest.mark.asyncio
+async def test_connection_test_reports_provider_auth_failure(monkeypatch):
+    import httpx
+    from src.leyra_gateway import app
+
+    monkeypatch.setenv("LEYRA_UPSTREAM_BASE_URL", "https://provider.example/v1")
+    monkeypatch.setenv("LEYRA_UPSTREAM_API_KEY", "bad-provider-key")
+    monkeypatch.setenv("LEYRA_GATEWAY_TOKEN", "client-token")
+
+    real_async_client = httpx.AsyncClient
+
+    class FakeProviderClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, headers):
+            return httpx.Response(401, json={"error": "invalid_api_key"})
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeProviderClient)
+    transport = httpx.ASGITransport(app=app)
+    async with real_async_client(transport=transport, base_url="http://test") as client:
+        response = await client.get(
+            "/leyra/connection/test",
+            headers={"Authorization": "Bearer client-token"},
+        )
+
+    assert response.status_code == 502
+    assert "HTTP 401" in response.json()["detail"]
+    assert "invalid_api_key" not in response.text
