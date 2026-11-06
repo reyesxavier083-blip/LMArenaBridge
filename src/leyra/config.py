@@ -12,6 +12,9 @@ class Settings:
     database_path: str
     database_url: str
     redis_url: str
+    jwt_secret: str
+    bootstrap_admin_email: str
+    bootstrap_admin_password: str
     environment: str
 
     @classmethod
@@ -21,6 +24,9 @@ class Settings:
             database_path=os.getenv("LEYRA_DATABASE_PATH", "/data/leyra.sqlite3").strip(),
             database_url=os.getenv("LEYRA_DATABASE_URL", "").strip(),
             redis_url=os.getenv("LEYRA_REDIS_URL", "").strip(),
+            jwt_secret=os.getenv("LEYRA_JWT_SECRET", "").strip(),
+            bootstrap_admin_email=os.getenv("LEYRA_BOOTSTRAP_ADMIN_EMAIL", "").strip().lower(),
+            bootstrap_admin_password=os.getenv("LEYRA_BOOTSTRAP_ADMIN_PASSWORD", ""),
             environment=os.getenv("LEYRA_ENV", "production").strip().lower(),
         )
 
