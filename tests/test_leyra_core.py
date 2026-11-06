@@ -72,7 +72,8 @@ def test_combined_cloud_app_mounts_core_and_provider_gateway():
     assert "/leyra/connection/test" in paths
     assert "/leyra/v1/models" in paths
     assert "/leyra/v1/chat/completions" in paths
-\n
+
+
 
 
 def test_sqlite_storage_health_and_audit(client):
