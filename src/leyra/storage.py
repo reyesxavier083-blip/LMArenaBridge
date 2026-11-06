@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from datetime import timedelta
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -59,13 +60,22 @@ class Storage:
                 json_type = "JSONB NOT NULL DEFAULT '{}'::jsonb"
             db.execute(f"""CREATE TABLE IF NOT EXISTS memory (
                 id {id_type}, namespace TEXT NOT NULL, content TEXT NOT NULL,
-                metadata_json {json_type}, created_at TEXT NOT NULL, owner_id TEXT NOT NULL DEFAULT 'shared')""")
+                metadata_json {json_type}, created_at TEXT NOT NULL, owner_id TEXT NOT NULL DEFAULT 'shared', memory_type TEXT NOT NULL DEFAULT 'semantic', importance INTEGER NOT NULL DEFAULT 3, expires_at TEXT)""")
             if self.backend == "postgresql":
                 db.execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS owner_id TEXT NOT NULL DEFAULT 'shared'")
+                db.execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS memory_type TEXT NOT NULL DEFAULT 'semantic'")
+                db.execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS importance INTEGER NOT NULL DEFAULT 3")
+                db.execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS expires_at TEXT")
             else:
                 columns = {row[1] for row in db.execute("PRAGMA table_info(memory)").fetchall()}
                 if "owner_id" not in columns:
                     db.execute("ALTER TABLE memory ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'shared'")
+                if "memory_type" not in columns:
+                    db.execute("ALTER TABLE memory ADD COLUMN memory_type TEXT NOT NULL DEFAULT 'semantic'")
+                if "importance" not in columns:
+                    db.execute("ALTER TABLE memory ADD COLUMN importance INTEGER NOT NULL DEFAULT 3")
+                if "expires_at" not in columns:
+                    db.execute("ALTER TABLE memory ADD COLUMN expires_at TEXT")
             db.execute("UPDATE memory SET owner_id = 'control-token' WHERE owner_id = 'shared'")
             db.execute("""CREATE TABLE IF NOT EXISTS memory_embeddings (
                 memory_id BIGINT PRIMARY KEY, owner_id TEXT NOT NULL,
@@ -88,20 +98,29 @@ class Storage:
                 pass
 
     def save_memory(self, namespace: str, content: str,
-                    metadata: dict[str, Any] | None = None, owner_id: str = "shared") -> int:
+                    metadata: dict[str, Any] | None = None, owner_id: str = "shared",
+                    memory_type: str = "semantic", importance: int = 3,
+                    ttl_days: int | None = None) -> int:
         created = datetime.now(timezone.utc).isoformat()
         payload = json.dumps(metadata or {}, ensure_ascii=False)
+        if memory_type not in {"episodic", "semantic", "preference", "procedural"}:
+            raise ValueError("Invalid memory type")
+        if not 1 <= int(importance) <= 5:
+            raise ValueError("Importance must be between 1 and 5")
+        if ttl_days is not None and not 1 <= int(ttl_days) <= 3650:
+            raise ValueError("ttl_days must be between 1 and 3650")
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=int(ttl_days))).isoformat() if ttl_days is not None else None
         with self.connect() as db:
             if self.backend == "postgresql":
                 row = db.execute(
-                    "INSERT INTO memory(namespace, content, metadata_json, created_at, owner_id) "
-                    "VALUES (%s, %s, %s::jsonb, %s, %s) RETURNING id",
-                    (namespace, content, payload, created, owner_id)).fetchone()
+                    "INSERT INTO memory(namespace, content, metadata_json, created_at, owner_id, memory_type, importance, expires_at) "
+                    "VALUES (%s, %s, %s::jsonb, %s, %s, %s, %s, %s) RETURNING id",
+                    (namespace, content, payload, created, owner_id, memory_type, int(importance), expires_at)).fetchone()
                 memory_id = int(row["id"])
             else:
                 cursor = db.execute(
-                    "INSERT INTO memory(namespace, content, metadata_json, created_at, owner_id) VALUES (?, ?, ?, ?, ?)",
-                    (namespace, content, payload, created, owner_id))
+                    "INSERT INTO memory(namespace, content, metadata_json, created_at, owner_id, memory_type, importance, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (namespace, content, payload, created, owner_id, memory_type, int(importance), expires_at))
                 memory_id = int(cursor.lastrowid)
         self._invalidate(namespace, owner_id)
         return memory_id
@@ -118,9 +137,9 @@ class Storage:
                 pass
         with self.connect() as db:
             rows = db.execute(self._sql(
-                "SELECT id, namespace, content, metadata_json, created_at FROM memory "
-                "WHERE namespace = ? AND owner_id = ? ORDER BY id DESC LIMIT ?"),
-                (namespace, owner_id, bounded)).fetchall()
+                "SELECT id, namespace, content, metadata_json, created_at, memory_type, importance, expires_at FROM memory "
+                "WHERE namespace = ? AND owner_id = ? AND (expires_at IS NULL OR expires_at > ?) ORDER BY importance DESC, id DESC LIMIT ?"),
+                (namespace, owner_id, datetime.now(timezone.utc).isoformat(), bounded)).fetchall()
         items = []
         for row in rows:
             metadata = row["metadata_json"]
@@ -128,7 +147,8 @@ class Storage:
                 metadata = json.loads(metadata)
             items.append({"id": row["id"], "namespace": row["namespace"],
                           "content": row["content"], "metadata": metadata,
-                          "created_at": row["created_at"]})
+                          "created_at": row["created_at"], "memory_type": row["memory_type"],
+                          "importance": row["importance"], "expires_at": row["expires_at"]})
         if self.cache:
             try:
                 self.cache.setex(key, 60, json.dumps(items, ensure_ascii=False))
@@ -147,9 +167,9 @@ class Storage:
         params = [namespace] + [f"%{token}%" for token in tokens]
         with self.connect() as db:
             rows = db.execute(self._sql(
-                "SELECT id, namespace, content, metadata_json, created_at FROM memory "
-                "WHERE namespace = ? AND owner_id = ? AND (" + clauses + ") ORDER BY id DESC LIMIT 200"),
-                tuple([namespace, owner_id] + params[1:])).fetchall()
+                "SELECT id, namespace, content, metadata_json, created_at, memory_type, importance, expires_at FROM memory "
+                "WHERE namespace = ? AND owner_id = ? AND (expires_at IS NULL OR expires_at > ?) AND (" + clauses + ") ORDER BY importance DESC, id DESC LIMIT 200"),
+                tuple([namespace, owner_id, datetime.now(timezone.utc).isoformat()] + params[1:])).fetchall()
         ranked = []
         for row in rows:
             content = row["content"]
@@ -158,7 +178,8 @@ class Storage:
             metadata = row["metadata_json"]
             if isinstance(metadata, str): metadata = json.loads(metadata)
             ranked.append((score, {"id": row["id"], "namespace": row["namespace"],
-                "content": content, "metadata": metadata, "created_at": row["created_at"]}))
+                "content": content, "metadata": metadata, "created_at": row["created_at"],
+                "memory_type": row["memory_type"], "importance": row["importance"], "expires_at": row["expires_at"]}))
         ranked.sort(key=lambda item: (item[0], item[1]["id"]), reverse=True)
         return [item[1] for item in ranked[:bounded]]
 
@@ -194,10 +215,10 @@ class Storage:
         if not vector or len(vector) > 10000:
             return []
         bounded = max(1, min(limit, 20))
-        sql = ("SELECT m.id, m.namespace, m.content, m.metadata_json, m.created_at, "
+        sql = ("SELECT m.id, m.namespace, m.content, m.metadata_json, m.created_at, m.memory_type, m.importance, m.expires_at, "
                "e.vector_json, e.model FROM memory m JOIN memory_embeddings e ON e.memory_id=m.id "
-               "WHERE m.namespace = ? AND m.owner_id = ? AND e.owner_id = ?")
-        params: list[Any] = [namespace, owner_id, owner_id]
+               "WHERE m.namespace = ? AND m.owner_id = ? AND e.owner_id = ? AND (m.expires_at IS NULL OR m.expires_at > ?)")
+        params: list[Any] = [namespace, owner_id, owner_id, datetime.now(timezone.utc).isoformat()]
         if model:
             sql += " AND e.model = ?"
             params.append(model)
@@ -218,7 +239,8 @@ class Storage:
                 metadata = json.loads(metadata)
             item = {"id": row["id"], "namespace": row["namespace"],
                     "content": row["content"], "metadata": metadata,
-                    "created_at": row["created_at"], "score": round(score, 6),
+                    "created_at": row["created_at"], "memory_type": row["memory_type"],
+                    "importance": row["importance"], "expires_at": row["expires_at"], "score": round(score, 6),
                     "retrieval": "vector"}
             ranked.append((score, item))
         ranked.sort(key=lambda pair: (pair[0], pair[1]["id"]), reverse=True)
