@@ -1,0 +1,4 @@
+# Minimal dependencies for the standalone LEYRA gateway (no browser automation).
+fastapi>=0.100,<1
+uvicorn>=0.23,<1
+httpx>=0.24,<1
