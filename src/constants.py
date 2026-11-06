@@ -10,8 +10,8 @@ All hardcoded values should be defined here.
 # Set to True for detailed logging, False for minimal logging
 DEBUG = True
 
-# Port to run the server on
-PORT = 8000
+# Port to run the server on; configurable for Termux and deployment.
+PORT = int(os.getenv("PORT", "8000"))
 
 # Default config and models file paths
 CONFIG_FILE = "config.json"
