@@ -54,3 +54,13 @@ def test_upstream_url_joins_api_path():
         timeout_seconds=90,
     )
     assert upstream_url(settings, "/models") == "https://api.example.com/v1/models"
+
+
+
+def test_gateway_router_is_mounted_under_leyra_prefix():
+    from src.leyra_gateway import router
+
+    paths = {route.path for route in router.routes}
+    assert "/leyra/health" in paths
+    assert "/leyra/v1/models" in paths
+    assert "/leyra/v1/chat/completions" in paths
