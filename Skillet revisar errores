@@ -1,0 +1,72 @@
+skillet-fixer/
+├── SKILL.md
+└── scripts/
+    ├── collect-errors.sh
+    └── verify-fix.sh
+
+    ---
+name: skillet-fixer
+description: Repara errores de compilación, tests, lint y dependencias en el repositorio de LMArena. Úsala cuando el usuario pida “arreglar los errores de lmarena” o equivalentes.
+version: 1.0.0
+trigger: >
+  Use when the user asks to fix all errors in the lmarena repository,
+  or when CI/tests/lint are failing in an LMArena-based repo.
+license: MIT
+author: tu-nombre
+categories: ["debug", "ci", "lmarena"]
+tags: ["skillet", "lmarena", "bugfix", "ci"]
+---
+
+# Skillet Fixer para LMArena
+
+## Propósito
+Detectar y corregir de forma segura los errores del repositorio de LMArena
+(`lmarena/search-arena`, `lm-sys/FastChat` o el fork que uses), priorizando
+los fallos que rompen CI, tests o build.
+
+## Flujo de trabajo
+
+### 1. Reconocimiento del repositorio
+- Identifica el stack: `requirements.txt`, `pyproject.toml`, `package.json`, `Dockerfile`, workflows de CI.
+- Ejecuta el script `scripts/collect-errors.sh` para volcar todos los errores en `error-report/`:
+  - `build.log` (compilación o instalación)
+  - `test.log` (pytest / jest / etc.)
+  - `lint.log` (flake8, ruff, eslint…)
+  - `security.log` (pip-audit, npm audit)
+- Si no hay scripts, ejecuta manualmente los comandos habituales del repo
+  (`pytest`, `npm test`, `make lint`, etc.).
+
+### 2. Priorización
+Clasifica los hallazgos en:
+- **Críticos**: rompen el build o CI, o son vulnerabilidades de seguridad.
+- **Importantes**: tests que fallan de forma reproducible.
+- **Menores**: lint, warnings, formato.
+
+Empieza siempre por los críticos.
+
+### 3. Reproducción y causa raíz
+Para cada error seleccionado:
+1. Invoca la skill **`refire`** (o aplica su lógica): reproduce el fallo y traza la causa raíz antes de proponer un parche[reference:4].
+2. Si el error es de comportamiento, invoca **`taste`** para escribir primero un test que falle y demuestre el bug[reference:5].
+
+### 4. Corrección
+- Aplica el cambio mínimo que resuelva la causa raíz.
+- Si el error es de dependencia, actualiza la versión o el pin solo si es compatible.
+- No mezcles refactors grandes con el arreglo.
+
+### 5. Verificación obligatoria
+- Ejecuta `scripts/verify-fix.sh` o los comandos de test/lint que correspondan.
+- Invoca la skill **`check`**: no declares un error “arreglado” hasta que la verificación pase[reference:6].
+- Si el arreglo toca streaming, cookies o el proveedor de LMArena, revisa los issues conocidos (p. ej. el contrato de chunks SSE o la validación de cookies)[reference:7][reference:8].
+
+### 6. Informe final
+Genera `fix-report.md` con:
+- Errores encontrados y su clasificación.
+- Errores realmente corregidos + evidencia (log de test que pasa).
+- Errores no corregidos y por qué (requieren decisión humana, cambio de contrato, etc.).
+- Riesgos residuales.
+
+## Reglas
+- **Nunca** corrijas un error sin haberlo reproducido antes.
+- **Nunca** des por bueno un arreglo sin un test o verificación que lo demuestre.
+- Si un error requiere cambiar una API pública o un contrato de datos, **pregunta al usuario** antes de aplicarlo.
