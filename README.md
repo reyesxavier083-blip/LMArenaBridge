@@ -51,7 +51,7 @@ Inicia el servidor:
 python -m src.main
 ```
 
-Por defecto escucha únicamente en `127.0.0.1:8000`. La variable `HOST` permite cambiar la dirección de escucha de forma explícita.
+Por defecto escucha únicamente en `127.0.0.1:8000`. Las variables `HOST` y `PORT` permiten cambiar explícitamente la dirección y el puerto; por ejemplo, `HOST=127.0.0.1 PORT=8001 python -m src.main`.
 
 - Panel: `http://127.0.0.1:8000/dashboard`
 - Inicio de sesión: `http://127.0.0.1:8000/login`
