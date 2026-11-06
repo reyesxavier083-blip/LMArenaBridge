@@ -112,7 +112,8 @@ async def chat(body: ChatRequest, request: Request):
     result = await ModelProvider().chat(payload)
     storage.audit("model.chat", str(claims.get("email", "unknown")), "completed")
     if isinstance(result, dict):
-        result["leyra_memory"] = {"used": bool(recalled), "count": len(recalled)}
+        result["leyra_memory"] = {"used": bool(recalled), "count": len(recalled),
+                                "retrieval": recalled[0].get("retrieval", "lexical") if recalled else "lexical"}
     return result
 
 
