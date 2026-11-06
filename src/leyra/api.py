@@ -10,6 +10,7 @@ from .agents import build_agents
 from .auth import hash_password, issue_token, require_role, verify_password
 from .config import Settings, ensure_data_directory
 from .orchestrator import Orchestrator
+from .providers import ModelProvider
 from .security import require_control_access
 from .storage import Storage
 
@@ -35,6 +36,13 @@ class UserCreateRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=12, max_length=256)
     role: str = Field(pattern="^(viewer|operator|admin)$")
+
+
+class ChatRequest(BaseModel):
+    model: str = Field(min_length=1, max_length=160)
+    messages: list[dict[str, Any]] = Field(min_length=1, max_length=100)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    max_tokens: int | None = Field(default=None, ge=1, le=32768)
 
 
 def get_services(request: Request):
@@ -71,6 +79,22 @@ async def create_user(body: UserCreateRequest, request: Request):
     return {"id": user_id, "email": str(body.email).lower(), "role": body.role}
 
 
+@router.get("/models")
+async def list_models(request: Request):
+    protect(request, "viewer")
+    return await ModelProvider().models()
+
+
+@router.post("/chat")
+async def chat(body: ChatRequest, request: Request):
+    claims = protect(request, "operator")
+    payload = body.model_dump(exclude_none=True)
+    result = await ModelProvider().chat(payload)
+    storage = request.app.state.leyra_storage
+    storage.audit("model.chat", str(claims.get("email", "unknown")), "completed")
+    return result
+
+
 @router.get("/health")
 async def health(request: Request):
     settings, storage, _ = get_services(request)
@@ -80,6 +104,7 @@ async def health(request: Request):
         "environment": settings.environment,
         "storage": storage.health(),
         "agents_registered": len(request.app.state.leyra_orchestrator.agents),
+        "model_provider_configured": ModelProvider().configured(),
     }
 
 
