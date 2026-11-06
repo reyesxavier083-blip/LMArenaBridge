@@ -13,7 +13,7 @@ from typing import AsyncIterator
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 
@@ -85,9 +85,10 @@ app = FastAPI(
     version="0.1.0",
     description="Provider-neutral, OpenAI-compatible gateway for LEYRA IA.",
 )
+router = APIRouter(prefix="/leyra", tags=["LEYRA IA"])
 
 
-@app.get("/health")
+@router.get("/health")
 async def health() -> JSONResponse:
     """Return non-sensitive readiness information."""
     configured = bool(
@@ -99,7 +100,7 @@ async def health() -> JSONResponse:
     )
 
 
-@app.get("/v1/models")
+@router.get("/v1/models")
 async def list_models(request: Request) -> Response:
     settings = get_settings()
     authorize(request.headers.get("authorization"), settings.gateway_token)
@@ -122,7 +123,7 @@ async def list_models(request: Request) -> Response:
     )
 
 
-@app.post("/v1/chat/completions")
+@router.post("/v1/chat/completions")
 async def chat_completions(request: Request) -> Response:
     settings = get_settings()
     authorize(request.headers.get("authorization"), settings.gateway_token)
@@ -194,3 +195,7 @@ async def chat_completions(request: Request) -> Response:
     finally:
         if not streaming_handed_off:
             await client.aclose()
+
+
+# Standalone development app; the main LMArenaBridge app mounts the same router.
+app.include_router(router)
