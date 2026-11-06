@@ -153,3 +153,32 @@ def test_memory_is_isolated_between_authenticated_users(client):
     assert alice_read.json()["items"][0]["content"] == "Alice private project memory"
     admin_search = client.get("/leyra/core/memory/search?query=Alice&namespace=private", headers=headers())
     assert admin_search.json()["items"] == []
+
+
+def test_vector_memory_uses_cosine_similarity_and_owner_scope(tmp_path):
+    from src.leyra.storage import Storage
+
+    storage = Storage(database_path=str(tmp_path / "vectors.sqlite3"))
+    first = storage.save_memory("semantic", "El proyecto trata sobre inteligencia artificial", owner_id="user-a")
+    second = storage.save_memory("semantic", "Receta de pan y cocina", owner_id="user-a")
+    storage.save_embedding(first, "user-a", "semantic", "test-embedding", [1.0, 0.0, 0.0])
+    storage.save_embedding(second, "user-a", "semantic", "test-embedding", [0.0, 1.0, 0.0])
+
+    result = storage.search_memory_vector([0.9, 0.1, 0.0], "semantic", 2,
+                                          owner_id="user-a", model="test-embedding")
+    assert result[0]["id"] == first
+    assert result[0]["retrieval"] == "vector"
+    assert result[0]["score"] > result[1]["score"]
+    assert storage.search_memory_vector([1.0, 0.0, 0.0], "semantic", 5,
+                                        owner_id="user-b", model="test-embedding") == []
+
+
+def test_vector_memory_rejects_dimension_mismatch(tmp_path):
+    from src.leyra.storage import Storage
+
+    storage = Storage(database_path=str(tmp_path / "dimensions.sqlite3"))
+    memory_id = storage.save_memory("semantic", "test", owner_id="user-a")
+    storage.save_embedding(memory_id, "user-a", "semantic", "test-model", [1.0, 0.0])
+    result = storage.search_memory_vector([1.0, 0.0, 0.0], "semantic", 5,
+                                          owner_id="user-a", model="test-model")
+    assert result == []
