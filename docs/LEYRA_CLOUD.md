@@ -58,3 +58,21 @@ The core also supports JWT login at `POST /leyra/core/auth/login`. Bootstrap the
 ## Current implementation boundary
 
 Planner, persistent memory, audit logging, API and container deployment are implemented in code. Specialist adapters for research, code execution, WordPress, security scanning, vision, voice, creative generation and automation remain `not_configured` until real providers and permission controls are added. No external execution is claimed for those adapters.
+
+### Long-term memory
+
+Memory records can be classified as `episodic`, `semantic`, `preference` or `procedural`. Each record has an importance score from 1 to 5 (default 3). Optional `ttl_days` sets an expiration from 1 to 3650 days; omitted means no automatic expiration. Expired records are excluded from list, lexical search and vector retrieval without exposing another user's records.
+
+Example `POST /leyra/core/memory` body:
+
+```json
+{
+  "namespace": "profile",
+  "content": "Prefers concise responses",
+  "memory_type": "preference",
+  "importance": 5,
+  "ttl_days": 365
+}
+```
+
+Existing database rows are migrated with safe defaults: semantic type, importance 3, and no expiration.
