@@ -117,3 +117,18 @@ def test_model_routes_require_auth_and_report_unconfigured_provider(client, monk
     chat = client.post("/leyra/core/chat", headers=headers(),
         json={"model": "example-model", "messages": [{"role": "user", "content": "Hola"}]})
     assert chat.status_code == 503
+
+
+def test_memory_search_ranks_relevant_context(client):
+    for content in ["LEYRA usa PostgreSQL y Redis", "La interfaz tiene un tema azul", "El motor de razonamiento recupera memoria contextual"]: 
+        saved = client.post("/leyra/core/memory", headers=headers(),
+            json={"namespace": "reasoning", "content": content})
+        assert saved.status_code == 200
+    result = client.get("/leyra/core/memory/search?query=razonamiento%20memoria&namespace=reasoning&limit=3", headers=headers())
+    assert result.status_code == 200
+    assert "razonamiento" in result.json()["items"][0]["content"].lower()
+
+
+def test_memory_search_requires_auth(client):
+    result = client.get("/leyra/core/memory/search?query=LEYRA")
+    assert result.status_code == 401
