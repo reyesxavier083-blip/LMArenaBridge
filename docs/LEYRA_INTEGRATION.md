@@ -48,6 +48,33 @@ The existing server listens according to its own configuration. For development,
 keep it bound to loopback. Do not expose it publicly without TLS termination,
 network restrictions, secret rotation, monitoring, and rate limits.
 
+## OpenAI provider configuration
+
+For the official OpenAI API, configure the gateway with:
+
+- `LEYRA_UPSTREAM_BASE_URL=https://api.openai.com/v1`
+- `LEYRA_UPSTREAM_API_KEY`: an API key supplied and managed by the authorized account owner.
+- `LEYRA_GATEWAY_TOKEN`: a separate random secret used only by LEYRA clients.
+
+The gateway then calls OpenAI's `GET /v1/models` and
+`POST /v1/chat/completions` endpoints. It does not use a ChatGPT web-session
+cookie or a ChatGPT subscription login. API usage is billed separately according
+to the API account's billing and model rates. Have the account owner review usage
+limits and billing before enabling requests.
+
+Example server environment (replace the placeholders locally; never commit actual
+secrets to GitHub):
+
+```bash
+export LEYRA_UPSTREAM_BASE_URL="https://api.openai.com/v1"
+export LEYRA_UPSTREAM_API_KEY="YOUR_OPENAI_API_KEY"
+export LEYRA_GATEWAY_TOKEN="YOUR_SEPARATE_LONG_RANDOM_GATEWAY_SECRET"
+export LEYRA_UPSTREAM_TIMEOUT_SECONDS="90"
+```
+
+Do not paste either secret into chat, source code, screenshots, or the mobile app.
+If a key is ever exposed, revoke it through the account owner's API settings.
+
 ## Verify the real provider connection
 
 After setting the environment variables and starting the server, call the connection
