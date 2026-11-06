@@ -25,6 +25,9 @@ class TaskRequest(BaseModel):
 class MemoryRequest(BaseModel):
     namespace: str = Field(default="general", min_length=1, max_length=80)
     content: str = Field(min_length=1, max_length=20000)
+    memory_type: str = Field(default="semantic", pattern="^(episodic|semantic|preference|procedural)$")
+    importance: int = Field(default=3, ge=1, le=5)
+    ttl_days: int | None = Field(default=None, ge=1, le=3650)
 
 
 class LoginRequest(BaseModel):
@@ -157,13 +160,16 @@ async def save_memory(body: MemoryRequest, request: Request):
     claims = protect(request)
     storage: Storage = request.app.state.leyra_storage
     owner_id = str(claims["sub"])
-    memory_id = storage.save_memory(body.namespace, body.content, owner_id=owner_id)
+    memory_id = storage.save_memory(body.namespace, body.content, owner_id=owner_id,
+                                    memory_type=body.memory_type, importance=body.importance,
+                                    ttl_days=body.ttl_days)
     provider = ModelProvider()
     vector = await provider.embed(body.content)
     if vector is not None:
         storage.save_embedding(memory_id, owner_id, body.namespace, provider.embedding_model, vector)
     storage.audit("memory.write", owner_id, "completed")
-    return {"status": "saved", "memory_id": memory_id,
+    return {"status": "saved", "memory_id": memory_id, "memory_type": body.memory_type,
+            "importance": body.importance, "ttl_days": body.ttl_days,
             "embedding": "stored" if vector is not None else "not_configured_or_unavailable"}
 
 
