@@ -63,6 +63,10 @@ class Storage:
             db.execute(f"""CREATE TABLE IF NOT EXISTS audit_events (
                 id {id_type}, event_type TEXT NOT NULL, actor TEXT NOT NULL,
                 outcome TEXT NOT NULL, created_at TEXT NOT NULL)""")
+            db.execute(f"""CREATE TABLE IF NOT EXISTS users (
+                id {id_type}, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+                role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL)""")
 
     def _invalidate(self, namespace: str) -> None:
         if self.cache:
@@ -134,6 +138,26 @@ class Storage:
                 "SELECT event_type, actor, outcome, created_at FROM audit_events ORDER BY id DESC LIMIT ?"),
                 (max(1, min(limit, 200)),)).fetchall()
         return [dict(row) for row in rows]
+
+    def create_user(self, email: str, password_hash: str, role: str) -> int:
+        created = datetime.now(timezone.utc).isoformat()
+        with self.connect() as db:
+            if self.backend == "postgresql":
+                row = db.execute(
+                    "INSERT INTO users(email, password_hash, role, created_at) VALUES (%s, %s, %s, %s) RETURNING id",
+                    (email.lower(), password_hash, role, created)).fetchone()
+                return int(row["id"])
+            cursor = db.execute(
+                "INSERT INTO users(email, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
+                (email.lower(), password_hash, role, created))
+            return int(cursor.lastrowid)
+
+    def get_user(self, email: str) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute(self._sql(
+                "SELECT id, email, password_hash, role, active FROM users WHERE email = ?"),
+                (email.lower(),)).fetchone()
+        return dict(row) if row else None
 
     def health(self) -> dict[str, str]:
         with self.connect() as db:
