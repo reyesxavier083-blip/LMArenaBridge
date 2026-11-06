@@ -132,3 +132,24 @@ def test_memory_search_ranks_relevant_context(client):
 def test_memory_search_requires_auth(client):
     result = client.get("/leyra/core/memory/search?query=LEYRA")
     assert result.status_code == 401
+
+
+def test_memory_is_isolated_between_authenticated_users(client):
+    admin_login = client.post("/leyra/core/auth/login", json={"email": "admin@example.com", "password": "test-admin-password-123"})
+    admin_token = admin_login.json()["access_token"]
+    created = client.post("/leyra/core/users", headers={"Authorization": "Bearer " + admin_token},
+        json={"email": "alice@example.com", "password": "alice-password-123", "role": "operator"})
+    assert created.status_code == 201
+    alice_login = client.post("/leyra/core/auth/login", json={"email": "alice@example.com", "password": "alice-password-123"})
+    alice_token = alice_login.json()["access_token"]
+    alice_headers = {"Authorization": "Bearer " + alice_token}
+    saved = client.post("/leyra/core/memory", headers=alice_headers,
+        json={"namespace": "private", "content": "Alice private project memory"})
+    assert saved.status_code == 200
+    admin_read = client.get("/leyra/core/memory?namespace=private", headers=headers())
+    assert admin_read.status_code == 200
+    assert admin_read.json()["items"] == []
+    alice_read = client.get("/leyra/core/memory?namespace=private", headers=alice_headers)
+    assert alice_read.json()["items"][0]["content"] == "Alice private project memory"
+    admin_search = client.get("/leyra/core/memory/search?query=Alice&namespace=private", headers=headers())
+    assert admin_search.json()["items"] == []
