@@ -12,6 +12,7 @@ export LEYRA_CONTROL_TOKEN='use-a-long-random-secret'
 export LEYRA_DATABASE_PATH='./data/leyra.sqlite3'
 export LEYRA_UPSTREAM_BASE_URL='https://api.openai.com/v1'
 export LEYRA_UPSTREAM_API_KEY='load-from-a-secret-manager'
+export LEYRA_EMBEDDING_MODEL='text-embedding-3-small'
 export LEYRA_GATEWAY_TOKEN='use-a-different-client-secret'
 uvicorn src.leyra.app:app --host 127.0.0.1 --port 8000
 ```
@@ -48,7 +49,7 @@ The application binds to 127.0.0.1:8000. Use a managed HTTPS reverse proxy befor
 - `GET /leyra/core/audit` — audit events.
 - Existing provider gateway: `/leyra/health`, `/leyra/connection/test`, `/leyra/v1/*`.
 
-Chat requests retrieve up to 10 relevant records from the selected memory namespace by keyword overlap and add them as contextual system information. Disable retrieval with `use_memory: false` when needed. This is lightweight lexical retrieval, not vector/embedding search.
+Memory supports optional semantic retrieval. Set `LEYRA_EMBEDDING_MODEL` to an embeddings model available at the configured provider's `/embeddings` endpoint. On memory writes, LEYRA stores the vector with the owner and namespace; searches embed the query and rank matching vectors with cosine similarity. If embeddings are not configured, unavailable, or return no usable matches, LEYRA falls back to lexical keyword retrieval. Disable chat retrieval with `use_memory: false`. Vectors are stored in a portable table supported by SQLite and PostgreSQL; pgvector is not required. Embedding requests send memory text to the explicitly configured upstream provider.
 
 The model engine uses `LEYRA_UPSTREAM_BASE_URL` and `LEYRA_UPSTREAM_API_KEY` to call an explicitly configured OpenAI-compatible HTTPS endpoint. It does not hardcode a provider or expose provider credentials to clients. The provider must implement `/models` and `/chat/completions`.
 
