@@ -59,7 +59,13 @@ class Storage:
                 json_type = "JSONB NOT NULL DEFAULT '{}'::jsonb"
             db.execute(f"""CREATE TABLE IF NOT EXISTS memory (
                 id {id_type}, namespace TEXT NOT NULL, content TEXT NOT NULL,
-                metadata_json {json_type}, created_at TEXT NOT NULL)""")
+                metadata_json {json_type}, created_at TEXT NOT NULL, owner_id TEXT NOT NULL DEFAULT 'shared')""")
+            if self.backend == "postgresql":
+                db.execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS owner_id TEXT NOT NULL DEFAULT 'shared'")
+            else:
+                columns = {row[1] for row in db.execute("PRAGMA table_info(memory)").fetchall()}
+                if "owner_id" not in columns:
+                    db.execute("ALTER TABLE memory ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'shared'")
             db.execute(f"""CREATE TABLE IF NOT EXISTS audit_events (
                 id {id_type}, event_type TEXT NOT NULL, actor TEXT NOT NULL,
                 outcome TEXT NOT NULL, created_at TEXT NOT NULL)""")
@@ -68,10 +74,10 @@ class Storage:
                 role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL)""")
 
-    def _invalidate(self, namespace: str) -> None:
+    def _invalidate(self, namespace: str, owner_id: str) -> None:
         if self.cache:
             try:
-                for key in self.cache.scan_iter(match=f"leyra:memory:{namespace}:*"):
+                for key in self.cache.scan_iter(match=f"leyra:memory:{owner_id}:{namespace}:*"):
                     self.cache.delete(key)
             except Exception:
                 pass
@@ -85,19 +91,19 @@ class Storage:
                 row = db.execute(
                     "INSERT INTO memory(namespace, content, metadata_json, created_at) "
                     "VALUES (%s, %s, %s::jsonb, %s) RETURNING id",
-                    (namespace, content, payload, created)).fetchone()
+                    (namespace, content, payload, created, owner_id)).fetchone()
                 memory_id = int(row["id"])
             else:
                 cursor = db.execute(
-                    "INSERT INTO memory(namespace, content, metadata_json, created_at) VALUES (?, ?, ?, ?)",
-                    (namespace, content, payload, created))
+                    "INSERT INTO memory(namespace, content, metadata_json, created_at, owner_id) VALUES (?, ?, ?, ?, ?)",
+                    (namespace, content, payload, created, owner_id))
                 memory_id = int(cursor.lastrowid)
-        self._invalidate(namespace)
+        self._invalidate(namespace, owner_id)
         return memory_id
 
-    def list_memory(self, namespace: str, limit: int = 50) -> list[dict[str, Any]]:
+    def list_memory(self, namespace: str, limit: int = 50, owner_id: str = "shared") -> list[dict[str, Any]]:
         bounded = max(1, min(limit, 200))
-        key = f"leyra:memory:{namespace}:{bounded}"
+        key = f"leyra:memory:{owner_id}:{namespace}:{bounded}"
         if self.cache:
             try:
                 cached = self.cache.get(key)
@@ -125,7 +131,7 @@ class Storage:
                 pass
         return items
 
-    def search_memory(self, query: str, namespace: str = "general", limit: int = 5) -> list[dict[str, Any]]:
+    def search_memory(self, query: str, namespace: str = "general", limit: int = 5, owner_id: str = "shared") -> list[dict[str, Any]]:
         """Return recent memory records ranked by simple token overlap."""
         import re
         tokens = list(dict.fromkeys(re.findall(r"[\w-]{2,}", query.lower())))[:12]
