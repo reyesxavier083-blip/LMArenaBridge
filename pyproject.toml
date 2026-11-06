@@ -5,21 +5,33 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "lmarenabridge"
 version = "1.0.0"
-description = "A bridge to interact with LM Arena"
+description = "Python bridge for LM Arena workflows and OpenAI-compatible API integrations"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "CloudWaddie"}
 ]
+keywords = [
+    "lm-arena",
+    "api-bridge",
+    "openai-compatible",
+    "fastapi",
+    "python",
+    "leyra",
+    "browser-automation",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
     "fastapi>=0.100.0",
@@ -30,6 +42,12 @@ dependencies = [
     "cloudscraper",
     "python-multipart",
 ]
+
+[project.urls]
+Homepage = "https://github.com/reyesxavier083-blip/LMArenaBridge"
+Repository = "https://github.com/reyesxavier083-blip/LMArenaBridge"
+Issues = "https://github.com/reyesxavier083-blip/LMArenaBridge/issues"
+Changelog = "https://github.com/reyesxavier083-blip/LMArenaBridge/commits/main"
 
 [project.optional-dependencies]
 dev = [
@@ -57,16 +75,16 @@ where = ["src"]
 [tool.black]
 line-length = 100
 target-version = ['py310', 'py311', 'py312']
-include = '\.pyi?$'
+include = '\\.pyi?$'
 extend-exclude = '''
 /(
   # directories
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
+  \\.eggs
+  | \\.git
+  | \\.hg
+  | \\.mypy_cache
+  | \\.tox
+  | \\.venv
   | build
   | dist
 )/
