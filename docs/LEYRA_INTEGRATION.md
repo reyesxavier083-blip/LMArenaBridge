@@ -1,12 +1,15 @@
 # LEYRA IA — backend foundation
 
-This branch adds an isolated, provider-neutral gateway that LEYRA's web and Android
-clients can call through an OpenAI-compatible interface.
+This branch adds a provider-neutral gateway mounted into the existing LMArenaBridge
+FastAPI application. LEYRA web and Android clients can call it through an
+OpenAI-compatible interface.
 
 ## What is included
 
-- `src/leyra_gateway.py`: FastAPI gateway with `/health`, `/v1/models`, and
-  `/v1/chat/completions` routes.
+- `src/leyra_gateway.py`: reusable FastAPI router with `/leyra/health`,
+  `/leyra/v1/models`, and `/leyra/v1/chat/completions` routes.
+- `src/main.py` mounts the router into the existing server, so no second server is
+  required.
 - Streaming responses are forwarded as bytes so Server-Sent Events remain intact.
 - The LEYRA client token and upstream provider key are read from environment variables.
 - HTTPS is required for remote providers. Plain HTTP is accepted only for loopback
@@ -38,16 +41,17 @@ export LEYRA_UPSTREAM_BASE_URL="http://127.0.0.1:9000/v1"
 export LEYRA_UPSTREAM_API_KEY=""
 export LEYRA_GATEWAY_TOKEN="replace-with-a-long-random-secret"
 export LEYRA_UPSTREAM_TIMEOUT_SECONDS="90"
-uvicorn src.leyra_gateway:app --host 127.0.0.1 --port 8010
+python -m src.main
 ```
 
-The gateway listens on loopback in this example. Do not expose it publicly without
-TLS termination, network restrictions, secret rotation, monitoring, and rate limits.
+The existing server listens according to its own configuration. For development,
+keep it bound to loopback. Do not expose it publicly without TLS termination,
+network restrictions, secret rotation, monitoring, and rate limits.
 
 ## LEYRA client connection
 
-Use base URL `http://127.0.0.1:8010/v1` and the `LEYRA_GATEWAY_TOKEN` as the
-client Bearer token. Web and Android clients should call the gateway through a
+Use base URL `http://127.0.0.1:8000/leyra/v1` (adjust host/port to match the
+server configuration) and the `LEYRA_GATEWAY_TOKEN` as the client Bearer token. Web and Android clients should call the gateway through a
 backend-controlled connection; do not embed the upstream provider key in an APK.
 
 ## Validation still required
