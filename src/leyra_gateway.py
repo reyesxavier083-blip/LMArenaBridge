@@ -145,6 +145,7 @@ async def chat_completions(request: Request) -> Response:
     headers["Content-Type"] = "application/json"
     url = upstream_url(settings, "chat/completions")
 
+    streaming_handed_off = False
     try:
         if payload.get("stream") is True:
             outgoing = client.build_request("POST", url, headers=headers, json=payload)
@@ -165,6 +166,7 @@ async def chat_completions(request: Request) -> Response:
                     await upstream.aclose()
                     await client.aclose()
 
+            streaming_handed_off = True
             return StreamingResponse(
                 stream_body(),
                 status_code=upstream.status_code,
@@ -190,5 +192,5 @@ async def chat_completions(request: Request) -> Response:
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Could not reach the configured model provider.") from exc
     finally:
-        if not payload.get("stream"):
+        if not streaming_handed_off:
             await client.aclose()
