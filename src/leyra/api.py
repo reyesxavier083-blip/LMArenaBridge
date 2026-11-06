@@ -41,7 +41,7 @@ async def health(request: Request):
         "service": "leyra-core",
         "status": "ready",
         "environment": settings.environment,
-        "storage": "sqlite",
+        "storage": storage.health(),
         "agents_registered": len(request.app.state.leyra_orchestrator.agents),
     }
 
@@ -94,7 +94,7 @@ async def read_audit(request: Request, limit: int = 50):
 def initialize_services(app) -> None:
     settings = Settings.from_env()
     ensure_data_directory(settings)
-    storage = Storage(settings.database_path)
+    storage = Storage(settings.database_path, settings.database_url, settings.redis_url)
     app.state.leyra_settings = settings
     app.state.leyra_storage = storage
     app.state.leyra_orchestrator = Orchestrator(build_agents(storage), storage)
