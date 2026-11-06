@@ -67,6 +67,10 @@ class Storage:
                 if "owner_id" not in columns:
                     db.execute("ALTER TABLE memory ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'shared'")
             db.execute("UPDATE memory SET owner_id = 'control-token' WHERE owner_id = 'shared'")
+            db.execute("""CREATE TABLE IF NOT EXISTS memory_embeddings (
+                memory_id BIGINT PRIMARY KEY, owner_id TEXT NOT NULL,
+                namespace TEXT NOT NULL, model TEXT NOT NULL,
+                vector_json TEXT NOT NULL, created_at TEXT NOT NULL)""")
             db.execute(f"""CREATE TABLE IF NOT EXISTS audit_events (
                 id {id_type}, event_type TEXT NOT NULL, actor TEXT NOT NULL,
                 outcome TEXT NOT NULL, created_at TEXT NOT NULL)""")
@@ -157,6 +161,68 @@ class Storage:
                 "content": content, "metadata": metadata, "created_at": row["created_at"]}))
         ranked.sort(key=lambda item: (item[0], item[1]["id"]), reverse=True)
         return [item[1] for item in ranked[:bounded]]
+
+
+    def save_embedding(self, memory_id: int, owner_id: str, namespace: str,
+                       model: str, vector: list[float]) -> None:
+        if not vector or len(vector) > 10000:
+            raise ValueError("Invalid embedding vector")
+        payload = json.dumps([float(value) for value in vector])
+        created = datetime.now(timezone.utc).isoformat()
+        with self.connect() as db:
+            db.execute(self._sql(
+                "INSERT INTO memory_embeddings(memory_id, owner_id, namespace, model, vector_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(memory_id) DO UPDATE SET "
+                "owner_id=excluded.owner_id, namespace=excluded.namespace, model=excluded.model, "
+                "vector_json=excluded.vector_json, created_at=excluded.created_at"),
+                (memory_id, owner_id, namespace, model, payload, created))
+
+    @staticmethod
+    def _cosine_similarity(left: list[float], right: list[float]) -> float:
+        if not left or len(left) != len(right):
+            return -1.0
+        dot = sum(a * b for a, b in zip(left, right))
+        left_norm = sum(a * a for a in left) ** 0.5
+        right_norm = sum(b * b for b in right) ** 0.5
+        if not left_norm or not right_norm:
+            return -1.0
+        return dot / (left_norm * right_norm)
+
+    def search_memory_vector(self, vector: list[float], namespace: str = "general",
+                             limit: int = 5, owner_id: str = "shared",
+                             model: str | None = None) -> list[dict[str, Any]]:
+        if not vector or len(vector) > 10000:
+            return []
+        bounded = max(1, min(limit, 20))
+        sql = ("SELECT m.id, m.namespace, m.content, m.metadata_json, m.created_at, "
+               "e.vector_json, e.model FROM memory m JOIN memory_embeddings e ON e.memory_id=m.id "
+               "WHERE m.namespace = ? AND m.owner_id = ? AND e.owner_id = ?")
+        params: list[Any] = [namespace, owner_id, owner_id]
+        if model:
+            sql += " AND e.model = ?"
+            params.append(model)
+        sql += " ORDER BY m.id DESC LIMIT 1000"
+        with self.connect() as db:
+            rows = db.execute(self._sql(sql), tuple(params)).fetchall()
+        ranked = []
+        for row in rows:
+            try:
+                stored = json.loads(row["vector_json"])
+                score = self._cosine_similarity(vector, stored)
+            except (ValueError, TypeError, KeyError):
+                continue
+            if score < 0:
+                continue
+            metadata = row["metadata_json"]
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+            item = {"id": row["id"], "namespace": row["namespace"],
+                    "content": row["content"], "metadata": metadata,
+                    "created_at": row["created_at"], "score": round(score, 6),
+                    "retrieval": "vector"}
+            ranked.append((score, item))
+        ranked.sort(key=lambda pair: (pair[0], pair[1]["id"]), reverse=True)
+        return [item for score, item in ranked[:bounded]]
 
     def audit(self, event_type: str, actor: str, outcome: str) -> None:
         created = datetime.now(timezone.utc).isoformat()
