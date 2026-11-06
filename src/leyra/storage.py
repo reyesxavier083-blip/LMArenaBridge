@@ -125,6 +125,32 @@ class Storage:
                 pass
         return items
 
+    def search_memory(self, query: str, namespace: str = "general", limit: int = 5) -> list[dict[str, Any]]:
+        """Return recent memory records ranked by simple token overlap."""
+        import re
+        tokens = list(dict.fromkeys(re.findall(r"[\w-]{2,}", query.lower())))[:12]
+        if not tokens:
+            return []
+        bounded = max(1, min(limit, 20))
+        clauses = " OR ".join(["LOWER(content) LIKE ?" for _ in tokens])
+        params = [namespace] + [f"%{token}%" for token in tokens]
+        with self.connect() as db:
+            rows = db.execute(self._sql(
+                "SELECT id, namespace, content, metadata_json, created_at FROM memory "
+                "WHERE namespace = ? AND (" + clauses + ") ORDER BY id DESC LIMIT 200"),
+                tuple(params)).fetchall()
+        ranked = []
+        for row in rows:
+            content = row["content"]
+            lowered = content.lower()
+            score = sum(lowered.count(token) for token in tokens)
+            metadata = row["metadata_json"]
+            if isinstance(metadata, str): metadata = json.loads(metadata)
+            ranked.append((score, {"id": row["id"], "namespace": row["namespace"],
+                "content": content, "metadata": metadata, "created_at": row["created_at"]}))
+        ranked.sort(key=lambda item: (item[0], item[1]["id"]), reverse=True)
+        return [item[1] for item in ranked[:bounded]]
+
     def audit(self, event_type: str, actor: str, outcome: str) -> None:
         created = datetime.now(timezone.utc).isoformat()
         with self.connect() as db:
