@@ -1,0 +1,26 @@
+services:
+  leyra:
+    build:
+      context: .
+      dockerfile: Dockerfile.leyra
+    restart: unless-stopped
+    environment:
+      LEYRA_ENV: production
+      LEYRA_DATABASE_PATH: /data/leyra.sqlite3
+      LEYRA_CONTROL_TOKEN: ${LEYRA_CONTROL_TOKEN:?Set LEYRA_CONTROL_TOKEN in the deployment environment}
+      LEYRA_UPSTREAM_BASE_URL: ${LEYRA_UPSTREAM_BASE_URL:?Set LEYRA_UPSTREAM_BASE_URL}
+      LEYRA_UPSTREAM_API_KEY: ${LEYRA_UPSTREAM_API_KEY:-}
+      LEYRA_GATEWAY_TOKEN: ${LEYRA_GATEWAY_TOKEN:?Set LEYRA_GATEWAY_TOKEN}
+      LEYRA_UPSTREAM_TIMEOUT_SECONDS: ${LEYRA_UPSTREAM_TIMEOUT_SECONDS:-90}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - leyra_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/leyra/core/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  leyra_data:
