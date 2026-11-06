@@ -62,3 +62,14 @@ def test_unconfigured_agent_does_not_claim_execution(client):
     assert response.status_code == 200
     assert response.json()["status"] == "not_configured"
     assert response.json()["data"]["external_action_executed"] is False
+
+def test_combined_cloud_app_mounts_core_and_provider_gateway():
+    from src.leyra.app import app
+
+    paths = {route.path for route in app.routes}
+    assert "/leyra/core/health" in paths
+    assert "/leyra/health" in paths
+    assert "/leyra/connection/test" in paths
+    assert "/leyra/v1/models" in paths
+    assert "/leyra/v1/chat/completions" in paths
+\n
