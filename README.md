@@ -1,28 +1,19 @@
 # LMArenaBridge
 
-LMArenaBridge es un puente en Python para exponer una API compatible con OpenAI sobre modelos disponibles en LM Arena (`arena.ai`), manteniendo un comportamiento similar a `POST /api/v1/chat/completions`.
+LMArenaBridge es un proyecto Python que ofrece dos servicios diferenciados:
 
-El proyecto está pensado para servir como capa intermedia entre clientes compatibles con OpenAI y la infraestructura interna de LM Arena, incluyendo manejo de autenticación, rotación de tokens y resolución de desafíos de Cloudflare/reCAPTCHA mediante automatización de navegador.
+1. **Bridge de LM Arena:** expone una API compatible con OpenAI para interactuar con los flujos de LM Arena.
+2. **Gateway independiente de LEYRA IA:** reenvía solicitudes a un proveedor externo que ofrezca una API compatible con OpenAI. Este gateway no depende del navegador ni de la sesión de LM Arena.
 
-## Características
-
-- Endpoint compatible con OpenAI: `POST /api/v1/chat/completions`
-- Soporte para streaming de respuestas
-- Proxy de requests a LM Arena con navegador automatizado
-- Manejo de desafíos Cloudflare / Turnstile / reCAPTCHA
-- Rotación de tokens de autenticación
-- Detección y selección de transporte dinámico:
-  - HTTP directo con `httpx`
-  - Fetch vía Chrome/Playwright
-  - Fetch vía Camoufox
-  - Proxy usuarioscript para escenarios con autenticación limitada
-- Compatibilidad con modelos y flujos de prueba automatizados
+> **Importante:** el gateway de LEYRA no conecta automáticamente con LM Arena. Para que funcione, debes configurar la URL HTTPS y las credenciales de un proveedor compatible. La conexión se comprueba realmente consultando su endpoint `/models`.
 
 ## Requisitos
 
-- Python 3.10+ (el proyecto recomienda Python 3.12)
-- `pip` y `virtualenv` / `venv`
-- Navegadores compatibles con Playwright / Camoufox para automatización de navegador
+- Python 3.10 o superior (el repositorio fija Python 3.12.10).
+- pip.
+- Conexión a internet para instalar dependencias y acceder al proveedor.
+- Para el bridge principal: dependencias de navegador de Playwright/Camoufox cuando el transporte elegido las requiera.
+- Para LEYRA independiente: solamente FastAPI, Uvicorn y HTTPX.
 
 ## Instalación
 
@@ -33,28 +24,26 @@ git clone https://github.com/reyesxavier083-blip/LMArenaBridge.git
 cd LMArenaBridge
 ```
 
-Crea un entorno virtual e instala dependencias:
+### Bridge principal de LM Arena
+
+Instala sus dependencias:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # En Windows usa: .venv\Scripts\activate
-pip install -U pip
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-Opcionalmente, si quieres instalar el paquete en modo editable con dependencias de desarrollo:
+También puedes instalar las herramientas de desarrollo:
 
 ```bash
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
-Si usas Playwright y necesitas los navegadores instalados:
+Si vas a utilizar Playwright y necesitas instalar sus navegadores:
 
 ```bash
 python -m playwright install
 ```
-
-## Ejecución
 
 Inicia el servidor:
 
@@ -62,115 +51,167 @@ Inicia el servidor:
 python -m src.main
 ```
 
-El servicio levanta la API FastAPI y queda listo para recibir peticiones OpenAI-like.
+Por defecto escucha únicamente en `127.0.0.1:8000`. La variable `HOST` permite cambiar la dirección de escucha de forma explícita.
 
-## Uso rápido
+- Panel: `http://127.0.0.1:8000/dashboard`
+- Inicio de sesión: `http://127.0.0.1:8000/login`
+- API principal: `http://127.0.0.1:8000/api/v1`
+- Documentación FastAPI: `http://127.0.0.1:8000/docs`
 
-### Curl
+### Gateway independiente de LEYRA IA
+
+Este modo es más ligero y no instala Camoufox ni Playwright.
+
+Instala únicamente sus dependencias:
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/chat/completions" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "default",
-    "messages": [
-      {"role": "user", "content": "Hola, dime algo sobre LM Arena."}
-    ],
-    "stream": false
-  }'
+python -m pip install -r requirements-leyra.txt
 ```
 
-### Cliente compatible con OpenAI
+Configura las variables de entorno antes de iniciar el servidor. Ejemplo para Linux, macOS o Termux:
+
+```bash
+export LEYRA_UPSTREAM_BASE_URL="https://TU-PROVEEDOR/v1"
+export LEYRA_UPSTREAM_API_KEY="TU_CLAVE_DEL_PROVEEDOR"
+export LEYRA_GATEWAY_TOKEN="CREA_UN_TOKEN_PRIVADO"
+export LEYRA_UPSTREAM_TIMEOUT_SECONDS="90"
+```
+
+- `LEYRA_UPSTREAM_BASE_URL`: URL base de la API compatible con OpenAI. Debe usar HTTPS; HTTP solo se permite para localhost.
+- `LEYRA_UPSTREAM_API_KEY`: clave del proveedor. Déjala vacía únicamente si el proveedor no requiere autenticación.
+- `LEYRA_GATEWAY_TOKEN`: token privado que utilizará tu cliente para autenticarse ante LEYRA.
+- `LEYRA_UPSTREAM_TIMEOUT_SECONDS`: tiempo de espera entre 5 y 300 segundos.
+
+El archivo `.env.example` es una plantilla: **el gateway no carga automáticamente archivos .env**. Exporta las variables en la terminal o configura las variables de entorno en tu plataforma de despliegue. Nunca publiques claves ni tokens.
+
+Inicia el gateway en Termux:
+
+```bash
+chmod +x run_leyra.sh
+./run_leyra.sh
+```
+
+En otros entornos también puedes iniciarlo directamente:
+
+```bash
+python -m uvicorn src.leyra_gateway:app --host 127.0.0.1 --port 8000
+```
+
+Si el puerto 8000 está ocupado, cambia `PORT` al ejecutar el script:
+
+```bash
+PORT=8001 ./run_leyra.sh
+```
+
+#### Comprobar la conexión de LEYRA
+
+En otra terminal, usa el mismo token configurado en `LEYRA_GATEWAY_TOKEN`:
+
+```bash
+curl -i http://127.0.0.1:8000/leyra/health
+```
+
+La ruta de salud no requiere autenticación. Para probar la conexión real con el proveedor:
+
+```bash
+curl -i http://127.0.0.1:8000/leyra/connection/test \
+  -H "Authorization: Bearer TU_TOKEN_LEYRA"
+```
+
+Una conexión correcta devuelve HTTP 200 y `"connection":"connected"`. Si devuelve 502, revisa la URL del proveedor, su clave y que su endpoint `/models` esté disponible. Un HTTP 503 indica que falta configuración o que algún valor no es válido.
+
+Rutas disponibles:
+
+| Método | Ruta | Función |
+|---|---|---|
+| GET | `/leyra/health` | Estado básico del gateway |
+| GET | `/leyra/connection/test` | Prueba autenticada contra el proveedor |
+| GET | `/leyra/v1/models` | Lista modelos del proveedor |
+| POST | `/leyra/v1/chat/completions` | Envía conversaciones; admite streaming |
+
+#### Usar LEYRA desde un cliente OpenAI-compatible
+
+Configura el cliente con la URL base y el token del gateway (no confundas este token con la clave del proveedor):
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:8000/api/v1",
-    api_key="dummy-key",
+    base_url="http://127.0.0.1:8000/leyra/v1",
+    api_key="TU_TOKEN_LEYRA",
 )
 
 response = client.chat.completions.create(
-    model="default",
-    messages=[{"role": "user", "content": "¿Cómo va todo?"}],
+    model="NOMBRE_DEL_MODELO",
+    messages=[{"role": "user", "content": "Hola"}],
 )
 
 print(response.choices[0].message.content)
 ```
 
-## Arquitectura
-
-La estructura principal del proyecto es la siguiente:
-
-```text
-src/
-├── main.py              # Aplicación FastAPI, rutas, streaming y lifecycle
-├── constants.py         # Configuración, URLs, selectores, timeouts y constantes
-├── config.py            # Carga/guardado de configuración y modelos
-├── state.py             # Estado compartido en memoria
-├── browser_utils.py     # Utilidades de navegador y Playwright
-├── auth.py              # Gestión de tokens de autenticación
-├── recaptcha.py         # Generación de tokens reCAPTCHA
-├── transport.py         # Transportes HTTP/browser y streaming
-└── ...
-```
-
-El proyecto implementa varios transportes para adaptarse a distintos escenarios de acceso a LM Arena:
-
-1. HTTP directo con `httpx`
-2. Fetch vía navegador con Chrome/Edge y Playwright
-3. Fetch vía Camoufox
-4. Proxy de userscript para long polling
-
-## Modo de desarrollo y pruebas
-
-Se incluye una configuración de pytest y comandos útiles:
+El paquete `openai` se instala por separado si vas a ejecutar ese ejemplo:
 
 ```bash
-# Ejecutar todas las pruebas
-python -m pytest tests/
-
-# Ejecutar un archivo individual
-python -m pytest tests/test_stream_403_recaptcha_retries.py -v
-
-# Ejecutar una prueba concreta
-python -m pytest tests/test_stream_403_recaptcha_retries.py::TestStream403RecaptchaRetries::test_stream_403_recaptcha_validation_failed_retries_with_fresh_token -v
-
-# Comprobación de sintaxis
-python -c "import ast; ast.parse(open('src/main.py', encoding='utf-8').read()); print('OK')"
+python -m pip install openai
 ```
 
-## Consideraciones importantes
+### Ejecutar ambos servicios
 
-- El proyecto usa automatización de navegador para sortear desafíos de verificación que pueden bloquear acceso directo a LM Arena.
-- Los tokens de autenticación se gestionan con rotación y actualización periódica.
-- En algunos escenarios puede requerirse navegador local instalado y/o credenciales/estado de sesión válidos para acceder a la plataforma.
-- El servicio está orientado a entornos de desarrollo o despliegue controlado, no como una solución pública sin restricciones de acceso.
+El servidor principal importa y monta también las rutas del gateway LEYRA bajo el prefijo `/leyra`. Por tanto, si ejecutas `python -m src.main`, puedes usar esas rutas en el mismo puerto, siempre que hayas instalado las dependencias del proyecto y configurado las variables de LEYRA. No inicies simultáneamente ambos servidores en el mismo puerto.
 
-## Seguridad y uso responsable
+## Configuración y seguridad
 
-Este proyecto interactúa con servicios externos y automatiza navegación web. Debe usarse conforme a:
+- Mantén los servicios ligados a `127.0.0.1` mientras haces pruebas locales.
+- No expongas el gateway directamente a internet sin HTTPS, control de acceso y una configuración de despliegue segura.
+- No compartas `LEYRA_GATEWAY_TOKEN`, `LEYRA_UPSTREAM_API_KEY` ni archivos `.env`.
+- El gateway valida el token Bearer del cliente y utiliza por separado la credencial del proveedor.
+- El gateway limita el cuerpo de cada solicitud a 2 MiB y a 100 mensajes.
+- El gateway LEYRA no resuelve desafíos, no extrae cookies y no automatiza sesiones de terceros.
 
-- las políticas de uso del servicio destino,
-- los términos de servicio de LM Arena,
-- las licencias y restricciones del entorno donde se despliegue.
+## Pruebas
 
-No se recomienda exponer este proxy en internet sin revisar la compatibilidad, el cumplimiento legal y la seguridad de la configuración.
+Instala las dependencias de desarrollo y ejecuta:
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest
+```
+
+Para ejecutar solamente las pruebas del gateway LEYRA:
+
+```bash
+python -m pytest tests/test_leyra_gateway.py -v
+```
+
+## Estructura principal
+
+```text
+.
+├── src/
+│   ├── main.py              # Aplicación principal de LM Arena
+│   ├── leyra_gateway.py     # Gateway independiente y router de LEYRA
+│   ├── auth.py              # Autenticación del bridge principal
+│   ├── browser_utils.py     # Utilidades de navegador
+│   ├── config.py            # Configuración del bridge
+│   ├── constants.py         # Constantes
+│   ├── recaptcha.py         # Integración de verificación del bridge
+│   ├── state.py             # Estado compartido
+│   ├── transport.py         # Transportes del bridge
+│   └── vision_solver.py     # Integración opcional de visión
+├── tests/                   # Pruebas automatizadas
+├── requirements.txt         # Dependencias del bridge principal
+├── requirements-leyra.txt   # Dependencias mínimas de LEYRA
+├── run_leyra.sh             # Lanzador de LEYRA para Termux/Linux
+├── .env.example             # Plantilla de variables de entorno
+└── pyproject.toml           # Metadata y herramientas de desarrollo
+```
 
 ## Licencia
 
-Este proyecto se distribuye bajo la licencia MIT. Consulta el archivo `LICENSE` para más detalles.
+Distribuido bajo la licencia MIT. Consulta [LICENSE](LICENSE).
 
-## Agradecimientos y contexto
+## Referencias
 
-LMArenaBridge nace como una capa de integración para permitir acceso desde clientes compatibles con OpenAI a modelos disponibles en LM Arena, especialmente cuando la plataforma exige mecanismos adicionales de verificación y autenticación que no están expuestos por una API pública estándar.
-
----
-
-Si quieres, puedo convertir este README a una versión más orientada a:
-
-- GitHub con más badges y estructura comercial,
-- documentación técnica más detallada para desarrolladores,
-- versión en inglés,
-- o una versión enfocada en uso con OpenAI SDK y Docker.
-
+- [Repositorio](https://github.com/reyesxavier083-blip/LMArenaBridge)
+- [Incidencias](https://github.com/reyesxavier083-blip/LMArenaBridge/issues)
+- [Historial de cambios](https://github.com/reyesxavier083-blip/LMArenaBridge/commits/main)
