@@ -8,6 +8,9 @@ from src.leyra.api import initialize_services, router
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("LEYRA_CONTROL_TOKEN", "test-control-token")
+    monkeypatch.setenv("LEYRA_JWT_SECRET", "test-jwt-secret-that-is-long-enough")
+    monkeypatch.setenv("LEYRA_BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("LEYRA_BOOTSTRAP_ADMIN_PASSWORD", "test-admin-password-123")
     monkeypatch.setenv("LEYRA_DATABASE_PATH", str(tmp_path / "leyra.sqlite3"))
     app = FastAPI()
     initialize_services(app)
@@ -87,3 +90,19 @@ def test_sqlite_storage_health_and_audit(client):
     audit = client.get("/leyra/core/audit", headers=headers())
     assert audit.status_code == 200
     assert audit.json()["events"][0]["event_type"] == "memory.write"
+
+
+def test_admin_login_and_role_protected_user_creation(client):
+    login = client.post("/leyra/core/auth/login", json={"email": "admin@example.com", "password": "test-admin-password-123"})
+    assert login.status_code == 200
+    token = login.json()["access_token"]
+    created = client.post("/leyra/core/users", headers={"Authorization": "Bearer " + token},
+        json={"email": "viewer@example.com", "password": "viewer-password-123", "role": "viewer"})
+    assert created.status_code == 201
+    viewer_login = client.post("/leyra/core/auth/login", json={"email": "viewer@example.com", "password": "viewer-password-123"})
+    assert viewer_login.status_code == 200
+    viewer_token = viewer_login.json()["access_token"]
+    denied = client.get("/leyra/core/audit", headers={"Authorization": "Bearer " + viewer_token})
+    assert denied.status_code == 403
+    allowed = client.get("/leyra/core/agents", headers={"Authorization": "Bearer " + viewer_token})
+    assert allowed.status_code == 200
