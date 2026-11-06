@@ -180,7 +180,7 @@ class Storage:
     @staticmethod
     def _cosine_similarity(left: list[float], right: list[float]) -> float:
         if not left or len(left) != len(right):
-            return -1.0
+            return -2.0
         dot = sum(a * b for a, b in zip(left, right))
         left_norm = sum(a * a for a in left) ** 0.5
         right_norm = sum(b * b for b in right) ** 0.5
