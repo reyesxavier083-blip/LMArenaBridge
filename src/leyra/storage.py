@@ -66,6 +66,7 @@ class Storage:
                 columns = {row[1] for row in db.execute("PRAGMA table_info(memory)").fetchall()}
                 if "owner_id" not in columns:
                     db.execute("ALTER TABLE memory ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'shared'")
+            db.execute("UPDATE memory SET owner_id = 'control-token' WHERE owner_id = 'shared'")
             db.execute(f"""CREATE TABLE IF NOT EXISTS audit_events (
                 id {id_type}, event_type TEXT NOT NULL, actor TEXT NOT NULL,
                 outcome TEXT NOT NULL, created_at TEXT NOT NULL)""")
