@@ -7,13 +7,14 @@ third-party session cookies.
 from __future__ import annotations
 
 import hmac
+import json
 import os
 from dataclasses import dataclass
 from typing import AsyncIterator
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 
@@ -85,9 +86,12 @@ app = FastAPI(
     version="0.1.0",
     description="Provider-neutral, OpenAI-compatible gateway for LEYRA IA.",
 )
+router = APIRouter(prefix="/leyra", tags=["LEYRA IA"])
+MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024
+MAX_MESSAGES_PER_REQUEST = 100
 
 
-@app.get("/health")
+@router.get("/health")
 async def health() -> JSONResponse:
     """Return non-sensitive readiness information."""
     configured = bool(
@@ -99,7 +103,39 @@ async def health() -> JSONResponse:
     )
 
 
-@app.get("/v1/models")
+@router.get("/connection/test")
+async def test_provider_connection(request: Request) -> JSONResponse:
+    """Perform a real authenticated request to the configured provider's models endpoint."""
+    settings = get_settings()
+    authorize(request.headers.get("authorization"), settings.gateway_token)
+    timeout = httpx.Timeout(settings.timeout_seconds, connect=10.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            upstream = await client.get(
+                upstream_url(settings, "models"),
+                headers=upstream_headers(settings),
+            )
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="The model provider timed out.") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Could not reach the configured model provider.") from exc
+
+    if upstream.is_error:
+        # Do not relay provider bodies: they can contain account or infrastructure details.
+        raise HTTPException(
+            status_code=502,
+            detail=f"Provider connection failed with HTTP {upstream.status_code}. Check the provider URL and credential.",
+        )
+    return JSONResponse({
+        "service": "leyra-gateway",
+        "connection": "connected",
+        "provider_host": urlsplit(settings.upstream_base_url).hostname,
+        "models_endpoint_status": upstream.status_code,
+        "api_key_configured": bool(settings.upstream_api_key),
+    })
+
+
+@router.get("/v1/models")
 async def list_models(request: Request) -> Response:
     settings = get_settings()
     authorize(request.headers.get("authorization"), settings.gateway_token)
@@ -122,14 +158,17 @@ async def list_models(request: Request) -> Response:
     )
 
 
-@app.post("/v1/chat/completions")
+@router.post("/v1/chat/completions")
 async def chat_completions(request: Request) -> Response:
     settings = get_settings()
     authorize(request.headers.get("authorization"), settings.gateway_token)
 
+    body = await request.body()
+    if len(body) > MAX_REQUEST_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Request body exceeds the 2 MiB limit.")
     try:
-        payload = await request.json()
-    except Exception as exc:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=400, detail="Request body must be valid JSON.") from exc
 
     if not isinstance(payload, dict):
@@ -138,6 +177,8 @@ async def chat_completions(request: Request) -> Response:
         raise HTTPException(status_code=400, detail="A model name is required.")
     if not isinstance(payload.get("messages"), list) or not payload["messages"]:
         raise HTTPException(status_code=400, detail="At least one message is required.")
+    if len(payload["messages"]) > MAX_MESSAGES_PER_REQUEST:
+        raise HTTPException(status_code=413, detail="A maximum of 100 messages is allowed per request.")
 
     timeout = httpx.Timeout(settings.timeout_seconds, connect=10.0)
     client = httpx.AsyncClient(timeout=timeout)
@@ -194,3 +235,7 @@ async def chat_completions(request: Request) -> Response:
     finally:
         if not streaming_handed_off:
             await client.aclose()
+
+
+# Standalone development app; the main LMArenaBridge app mounts the same router.
+app.include_router(router)

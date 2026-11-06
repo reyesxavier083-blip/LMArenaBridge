@@ -30,6 +30,7 @@ import requests
 
 # Import from modularized modules
 from . import constants
+from .leyra_gateway import router as leyra_router
 from . import config as _config_module
 from . import state as _state_module
 from .config import get_models, save_models
@@ -620,6 +621,9 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
+
+# Mount the provider-neutral LEYRA API alongside the existing bridge routes.
+app.include_router(leyra_router)
 
 # Add CORS middleware to handle preflight requests and avoid 405 errors
 app.add_middleware(
@@ -4957,4 +4961,7 @@ if __name__ == "__main__":
     print(f"🔐 Login: http://localhost:{PORT}/login")
     print(f"📚 API Base URL: http://localhost:{PORT}/api/v1")
     print("=" * 60)
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    # Bind to loopback by default; opt into LAN/public binding explicitly via HOST.
+    host = os.getenv("HOST", "127.0.0.1").strip() or "127.0.0.1"
+    print(f"🌐 Server bind address: {host}:{PORT}")
+    uvicorn.run(app, host=host, port=PORT)

@@ -2,7 +2,8 @@ name: Continuous Integration
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, leyra-backend-foundation]
+  workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -12,6 +13,26 @@ permissions:
   pull-requests: write
 
 jobs:
+  leyra-gateway-tests:
+    name: LEYRA Gateway Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install gateway test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi httpx pytest pytest-asyncio
+
+      - name: Run LEYRA gateway tests
+        run: python -m pytest tests/test_leyra_gateway.py -v
+
   build-and-test:
     name: Build and Test
     runs-on: ubuntu-latest
