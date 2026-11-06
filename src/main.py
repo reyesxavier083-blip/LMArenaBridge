@@ -30,6 +30,7 @@ import requests
 
 # Import from modularized modules
 from . import constants
+from .leyra_gateway import router as leyra_router
 from . import config as _config_module
 from . import state as _state_module
 from .config import get_models, save_models
@@ -620,6 +621,9 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
+
+# Mount the provider-neutral LEYRA API alongside the existing bridge routes.
+app.include_router(leyra_router)
 
 # Add CORS middleware to handle preflight requests and avoid 405 errors
 app.add_middleware(
