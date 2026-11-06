@@ -88,7 +88,7 @@ async def list_models(request: Request):
 @router.post("/chat")
 async def chat(body: ChatRequest, request: Request):
     claims = protect(request, "operator")
-    payload = body.model_dump(exclude_none=True)
+    payload = body.dict(exclude_none=True)
     result = await ModelProvider().chat(payload)
     storage = request.app.state.leyra_storage
     storage.audit("model.chat", str(claims.get("email", "unknown")), "completed")
