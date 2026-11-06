@@ -4,9 +4,10 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 
 from .agents import build_agents
+from .auth import hash_password, issue_token, require_role, verify_password
 from .config import Settings, ensure_data_directory
 from .orchestrator import Orchestrator
 from .security import require_control_access
@@ -25,13 +26,49 @@ class MemoryRequest(BaseModel):
     content: str = Field(min_length=1, max_length=20000)
 
 
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=256)
+
+
+class UserCreateRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=12, max_length=256)
+    role: str = Field(pattern="^(viewer|operator|admin)$")
+
+
 def get_services(request: Request):
     return request.app.state.leyra_settings, request.app.state.leyra_storage, request.app.state.leyra_orchestrator
 
 
-def protect(request: Request) -> None:
+def protect(request: Request, minimum: str = "operator") -> dict:
     settings: Settings = request.app.state.leyra_settings
-    require_control_access(request, settings.control_token)
+    return require_role(request, minimum, settings.control_token, settings.jwt_secret)
+
+
+@router.post("/auth/login")
+async def login(body: LoginRequest, request: Request):
+    settings, storage, _ = get_services(request)
+    user = storage.get_user(str(body.email))
+    if not user or not user["active"] or not verify_password(body.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not settings.jwt_secret:
+        raise HTTPException(status_code=503, detail="JWT signing secret is not configured")
+    token = issue_token(user, settings.jwt_secret)
+    storage.audit("auth.login", str(user["email"]), "completed")
+    return {"access_token": token, "token_type": "bearer", "expires_in": 28800,
+            "user": {"id": user["id"], "email": user["email"], "role": user["role"]}}
+
+
+@router.post("/users", status_code=201)
+async def create_user(body: UserCreateRequest, request: Request):
+    protect(request, "admin")
+    settings, storage, _ = get_services(request)
+    if storage.get_user(str(body.email)):
+        raise HTTPException(status_code=409, detail="User already exists")
+    user_id = storage.create_user(str(body.email), hash_password(body.password), body.role)
+    storage.audit("user.create", str(user_id), "completed")
+    return {"id": user_id, "email": str(body.email).lower(), "role": body.role}
 
 
 @router.get("/health")
@@ -48,7 +85,7 @@ async def health(request: Request):
 
 @router.get("/agents")
 async def agents(request: Request):
-    protect(request)
+    protect(request, "viewer")
     orchestrator: Orchestrator = request.app.state.leyra_orchestrator
     return {"agents": sorted(orchestrator.agents.keys())}
 
@@ -86,7 +123,7 @@ async def read_memory(request: Request, namespace: str = "general", limit: int =
 
 @router.get("/audit")
 async def read_audit(request: Request, limit: int = 50):
-    protect(request)
+    protect(request, "admin")
     storage: Storage = request.app.state.leyra_storage
     return {"events": storage.list_audit(limit)}
 
@@ -95,6 +132,10 @@ def initialize_services(app) -> None:
     settings = Settings.from_env()
     ensure_data_directory(settings)
     storage = Storage(settings.database_path, settings.database_url, settings.redis_url)
+    if settings.bootstrap_admin_email and settings.bootstrap_admin_password and not storage.get_user(settings.bootstrap_admin_email):
+        if not settings.jwt_secret:
+            raise RuntimeError("LEYRA_JWT_SECRET is required when bootstrapping an admin")
+        storage.create_user(settings.bootstrap_admin_email, hash_password(settings.bootstrap_admin_password), "admin")
     app.state.leyra_settings = settings
     app.state.leyra_storage = storage
     app.state.leyra_orchestrator = Orchestrator(build_agents(storage), storage)
