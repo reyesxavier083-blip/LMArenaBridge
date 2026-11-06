@@ -132,7 +132,10 @@ class Storage:
             try:
                 cached = self.cache.get(key)
                 if cached:
-                    return json.loads(cached)
+                    cached_items = json.loads(cached)
+                    now = datetime.now(timezone.utc).isoformat()
+                    return [item for item in cached_items
+                            if item.get("expires_at") is None or item["expires_at"] > now]
             except Exception:
                 pass
         with self.connect() as db:
