@@ -83,14 +83,14 @@ class Storage:
                 pass
 
     def save_memory(self, namespace: str, content: str,
-                    metadata: dict[str, Any] | None = None) -> int:
+                    metadata: dict[str, Any] | None = None, owner_id: str = "shared") -> int:
         created = datetime.now(timezone.utc).isoformat()
         payload = json.dumps(metadata or {}, ensure_ascii=False)
         with self.connect() as db:
             if self.backend == "postgresql":
                 row = db.execute(
-                    "INSERT INTO memory(namespace, content, metadata_json, created_at) "
-                    "VALUES (%s, %s, %s::jsonb, %s) RETURNING id",
+                    "INSERT INTO memory(namespace, content, metadata_json, created_at, owner_id) "
+                    "VALUES (%s, %s, %s::jsonb, %s, %s) RETURNING id",
                     (namespace, content, payload, created, owner_id)).fetchone()
                 memory_id = int(row["id"])
             else:
@@ -114,8 +114,8 @@ class Storage:
         with self.connect() as db:
             rows = db.execute(self._sql(
                 "SELECT id, namespace, content, metadata_json, created_at FROM memory "
-                "WHERE namespace = ? ORDER BY id DESC LIMIT ?"),
-                (namespace, bounded)).fetchall()
+                "WHERE namespace = ? AND owner_id = ? ORDER BY id DESC LIMIT ?"),
+                (namespace, owner_id, bounded)).fetchall()
         items = []
         for row in rows:
             metadata = row["metadata_json"]
@@ -143,8 +143,8 @@ class Storage:
         with self.connect() as db:
             rows = db.execute(self._sql(
                 "SELECT id, namespace, content, metadata_json, created_at FROM memory "
-                "WHERE namespace = ? AND (" + clauses + ") ORDER BY id DESC LIMIT 200"),
-                tuple(params)).fetchall()
+                "WHERE namespace = ? AND owner_id = ? AND (" + clauses + ") ORDER BY id DESC LIMIT 200"),
+                tuple([namespace, owner_id] + params[1:])).fetchall()
         ranked = []
         for row in rows:
             content = row["content"]
