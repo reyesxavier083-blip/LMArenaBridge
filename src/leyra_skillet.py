@@ -71,8 +71,9 @@ async def _rpc(
     headers = {
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
-        "MCP-Protocol-Version": "2025-06-18",
     }
+    if method != "initialize":
+        headers["MCP-Protocol-Version"] = "2025-06-18"
     if session_id:
         headers["Mcp-Session-Id"] = session_id
     body: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
