@@ -198,3 +198,18 @@ def test_management_routes_are_registered():
     assert ("/leyra/skills", ("GET",)) in routes
     assert ("/leyra/v1/skills/manage", ("GET",)) in routes
     assert ("/leyra/v1/skills/{skill_name}/state", ("PUT",)) in routes
+
+
+
+def test_management_catalog_reports_actual_skill_scope(monkeypatch, tmp_path):
+    from src.leyra_skills import discover_skills, managed_skill_catalog
+
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    write_skill(home / ".agents" / "skills", "personal", "personal", "Personal skill")
+    write_skill(project / ".agents" / "skills", "project-only", "project-only", "Project skill")
+    monkeypatch.setenv("LEYRA_TRUST_PROJECT_SKILLS", "true")
+    skills = discover_skills(project, home, include_disabled=True)
+    by_name = {item["name"]: item for item in managed_skill_catalog(skills)}
+    assert by_name["personal"]["scope"] == "user"
+    assert by_name["project-only"]["scope"] == "project"
