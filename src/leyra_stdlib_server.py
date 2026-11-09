@@ -13,9 +13,9 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlsplit
+from urllib.request import Request, urlopen
 
 from .leyra_skills import activate_skill, discover_skills, read_skill_resource, skill_catalog
-from urllib.request import Request, urlopen
 
 
 MAX_BODY = 2 * 1024 * 1024
