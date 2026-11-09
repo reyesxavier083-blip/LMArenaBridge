@@ -65,3 +65,12 @@ def test_resource_reader_rejects_path_traversal(tmp_path):
 def test_invalid_skill_name_is_not_activated(tmp_path):
     with pytest.raises(ValueError):
         activate_skill("../escape", {})
+
+
+def test_skills_api_routes_are_registered():
+    from src.leyra_gateway import router
+
+    paths = {route.path for route in router.routes}
+    assert "/leyra/v1/skills" in paths
+    assert "/leyra/v1/skills/{skill_name}/activate" in paths
+    assert "/leyra/v1/skills/{skill_name}/resources/{resource_path:path}" in paths
