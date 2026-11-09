@@ -172,8 +172,8 @@ El servidor principal importa y monta también las rutas del gateway LEYRA bajo 
 
 LEYRA incorpora el estándar abierto Agent Skills con carga progresiva de catálogo,
 instrucciones y recursos. Consulta [docs/LEYRA_AGENT_SKILLS.md](docs/LEYRA_AGENT_SKILLS.md)
-para configurar las carpetas, habilitar proyectos de confianza y utilizar la API
-autenticada de habilidades.
+para configurar las carpetas, habilitar proyectos de confianza, administrar las habilidades
+desde `http://127.0.0.1:8000/leyra/skills` y utilizar su API autenticada.
 
 ## Pruebas
 
