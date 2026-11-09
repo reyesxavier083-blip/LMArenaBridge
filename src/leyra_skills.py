@@ -320,3 +320,95 @@ def read_skill_resource(name: str, relative_path: str, skills: dict[str, Skill] 
     if candidate.stat().st_size > MAX_SKILL_BYTES:
         raise ValueError("Skill resource exceeds the 1 MiB safety limit.")
     return candidate.read_text(encoding="utf-8")
+
+
+# Archive installation limits. Skill files are data; bundled scripts are never run.
+MAX_ARCHIVE_BYTES = 5 * 1024 * 1024
+MAX_ARCHIVE_FILES = 100
+MAX_ARCHIVE_UNPACKED_BYTES = 5 * 1024 * 1024
+
+
+def install_skill_archive(archive_bytes: bytes, home: str | Path | None = None) -> dict[str, str]:
+    """Safely install one Agent Skills ZIP into the user's .agents/skills directory."""
+    import io
+    import stat
+    import zipfile
+
+    if not isinstance(archive_bytes, bytes) or not archive_bytes:
+        raise ValueError("A non-empty ZIP archive is required.")
+    if len(archive_bytes) > MAX_ARCHIVE_BYTES:
+        raise ValueError("Skill archive exceeds the 5 MiB upload limit.")
+
+    destination_root = Path(home or Path.home()).expanduser().resolve() / ".agents" / "skills"
+    destination_root.mkdir(parents=True, exist_ok=True)
+    if destination_root.is_symlink():
+        raise ValueError("Skill installation directory cannot be a symlink.")
+
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(archive_bytes))
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise ValueError("Uploaded file is not a valid ZIP archive.") from exc
+
+    with archive:
+        entries = archive.infolist()
+        if not entries or len(entries) > MAX_ARCHIVE_FILES:
+            raise ValueError("ZIP must contain between 1 and 100 entries.")
+        total_size = 0
+        normalized: list[tuple[zipfile.ZipInfo, str]] = []
+        for info in entries:
+            raw_name = info.filename
+            if not raw_name or "\\\\" in raw_name or raw_name.startswith("/"):
+                raise ValueError("ZIP contains an unsafe path.")
+            parts = [part for part in raw_name.rstrip("/").split("/") if part]
+            if not parts or any(part in {".", ".."} for part in parts):
+                raise ValueError("ZIP contains an unsafe path.")
+            mode = (info.external_attr >> 16) & 0xFFFF
+            if stat.S_ISLNK(mode):
+                raise ValueError("ZIP symlinks are not allowed.")
+            if info.is_dir():
+                continue
+            total_size += info.file_size
+            if total_size > MAX_ARCHIVE_UNPACKED_BYTES:
+                raise ValueError("Expanded skill archive exceeds the 5 MiB limit.")
+            if info.file_size and info.compress_size == 0:
+                raise ValueError("ZIP contains an invalid compressed entry.")
+            if info.compress_size and info.file_size / info.compress_size > 100:
+                raise ValueError("ZIP compression ratio exceeds the safety limit.")
+            normalized.append((info, "/".join(parts)))
+
+        skill_files = [(info, path) for info, path in normalized if path.endswith("/SKILL.md") or path == "SKILL.md"]
+        if len(skill_files) != 1:
+            raise ValueError("ZIP must contain exactly one SKILL.md file.")
+        skill_path = skill_files[0][1]
+        prefix = skill_path[:-len("SKILL.md")].rstrip("/")
+        if prefix and "/" in prefix:
+            raise ValueError("ZIP must contain one skill folder at its root.")
+        skill_name = prefix or ""
+        # If SKILL.md is at ZIP root, derive the name from its frontmatter below.
+        stage_parent = Path(tempfile.mkdtemp(prefix=".leyra-skill-", dir=str(destination_root)))
+        stage = stage_parent / "skill"
+        stage.mkdir()
+        try:
+            for info, relative in normalized:
+                if prefix:
+                    if not relative.startswith(prefix + "/"):
+                        raise ValueError("ZIP contains files outside its skill folder.")
+                    relative = relative[len(prefix) + 1:]
+                target = (stage / relative).resolve()
+                try:
+                    target.relative_to(stage.resolve())
+                except ValueError as exc:
+                    raise ValueError("ZIP entry escapes the installation directory.") from exc
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(info, "r") as source, target.open("xb") as output:
+                    output.write(source.read(MAX_ARCHIVE_UNPACKED_BYTES + 1))
+            parsed = _read_skill(stage / "SKILL.md", scope="user")
+            skill_name = parsed.name
+            target_dir = destination_root / skill_name
+            if target_dir.exists() or target_dir.is_symlink():
+                raise FileExistsError(f"Skill '{skill_name}' is already installed.")
+            os.replace(stage, target_dir)
+            return {"name": parsed.name, "description": parsed.description, "scope": "user"}
+        finally:
+            import shutil
+            shutil.rmtree(stage_parent, ignore_errors=True)
