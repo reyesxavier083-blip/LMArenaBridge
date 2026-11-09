@@ -213,3 +213,54 @@ def test_management_catalog_reports_actual_skill_scope(monkeypatch, tmp_path):
     by_name = {item["name"]: item for item in managed_skill_catalog(skills)}
     assert by_name["personal"]["scope"] == "user"
     assert by_name["project-only"]["scope"] == "project"
+
+
+def test_install_skill_archive_accepts_valid_skill_zip(tmp_path):
+    import io
+    import zipfile
+    from src.leyra_skills import install_skill_archive, discover_skills
+
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as archive:
+        archive.writestr("hello/SKILL.md", "---\\nname: hello\\ndescription: Hello skill\\n---\\n\\nDo useful work.")
+        archive.writestr("hello/references/guide.md", "Reference.")
+        archive.writestr("hello/scripts/check.py", "print('not executed')")
+    result = install_skill_archive(data.getvalue(), tmp_path)
+    assert result["name"] == "hello"
+    skills = discover_skills(project_root=tmp_path / "project", home=tmp_path, include_project=False)
+    assert "hello" in skills
+    assert (tmp_path / ".agents/skills/hello/scripts/check.py").read_text() == "print('not executed')"
+
+
+def test_install_skill_archive_rejects_traversal(tmp_path):
+    import io
+    import zipfile
+    from src.leyra_skills import install_skill_archive
+
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as archive:
+        archive.writestr("safe/SKILL.md", "---\\nname: safe\\ndescription: Safe\\n---\\n")
+        archive.writestr("safe/../../escape.txt", "nope")
+    with pytest.raises(ValueError):
+        install_skill_archive(data.getvalue(), tmp_path)
+    assert not (tmp_path / "escape.txt").exists()
+
+
+def test_install_skill_archive_rejects_duplicate_skill(tmp_path):
+    import io
+    import zipfile
+    from src.leyra_skills import install_skill_archive
+
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as archive:
+        archive.writestr("repeat/SKILL.md", "---\\nname: repeat\\ndescription: Repeat\\n---\\n")
+    install_skill_archive(data.getvalue(), tmp_path)
+    with pytest.raises(FileExistsError):
+        install_skill_archive(data.getvalue(), tmp_path)
+
+
+def test_skill_install_route_is_registered():
+    from src.leyra_gateway import router
+    assert ("/leyra/v1/skills/install", ("POST",)) in {
+        (route.path, tuple(sorted(route.methods or []))) for route in router.routes
+    }
