@@ -371,19 +371,23 @@ async def chat_completions(request: Request) -> Response:
             local_calls = []
             for call in tool_calls:
                 if not isinstance(call, dict):
-                    continue
+                    local_calls = []
+                    break
                 function = call.get("function")
                 if not isinstance(function, dict):
-                    continue
+                    local_calls = []
+                    break
                 function_name = function.get("name")
                 if function_name not in {"leyra_activate_skill", "leyra_read_skill_resource"}:
-                    continue
+                    # Do not partially execute mixed local/external tool batches.
+                    local_calls = []
+                    break
                 local_calls.append({
                     "tool_call_id": str(call.get("id", "")),
                     "name": function_name,
                     "arguments": function.get("arguments", "{}"),
                 })
-            if not local_calls:
+            if not local_calls or any(not item["tool_call_id"] for item in local_calls):
                 return Response(
                     content=upstream.content,
                     status_code=upstream.status_code,
