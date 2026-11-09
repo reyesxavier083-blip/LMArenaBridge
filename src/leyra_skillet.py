@@ -112,8 +112,19 @@ async def call_skillet_tool(name: str, arguments: dict[str, Any] | None = None) 
         if not isinstance(init.get("result"), dict):
             raise SkilletError("Skillet MCP initialization failed.")
         await _rpc(client, endpoint, "notifications/initialized", request_id=None, session_id=session)
-        params = {"name": name, "arguments": arguments or {}}
-        response, _ = await _rpc(client, endpoint, "tools/call", params, request_id=2, session_id=session)
+        listed, session = await _rpc(client, endpoint, "tools/list", request_id=2, session_id=session)
+        tool_rows = listed.get("result", {}).get("tools", [])
+        available = {
+            item.get("name") for item in tool_rows
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        }
+        remote_name = name
+        if name == "search_skills" and name not in available and "search" in available:
+            remote_name = "search"
+        if remote_name not in available:
+            raise SkilletError("The connected Skillet server does not expose the requested read-only tool.")
+        params = {"name": remote_name, "arguments": arguments or {}}
+        response, _ = await _rpc(client, endpoint, "tools/call", params, request_id=3, session_id=session)
         result = response.get("result")
         if not isinstance(result, dict):
             raise SkilletError("Skillet MCP returned no tool result.")
