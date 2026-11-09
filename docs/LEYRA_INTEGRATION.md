@@ -104,3 +104,16 @@ Run the repository test suite and static checks in CI. The connection-test route
 mocked success and provider-auth-failure tests; a real deployment still requires
 valid provider credentials and a successful live call to `/leyra/connection/test`.
 Then verify non-streaming and streaming chat requests and model listing.
+
+
+## Agent Skills runtime
+
+The FastAPI chat-completions route can automatically disclose the compact Agent
+Skills catalog and expose local activation/resource functions to the model on
+non-streaming requests. The model decides when a matching skill is needed; LEYRA
+loads only that skill's instructions and reads referenced resources on demand.
+Local skill calls are read-only, bounded to four rounds per request, and never
+execute bundled scripts. Streaming requests retain the existing raw SSE
+passthrough behavior and do not yet auto-activate skills. See
+[LEYRA_AGENT_SKILLS.md](LEYRA_AGENT_SKILLS.md) for folder layout, trust settings,
+and endpoint details.
