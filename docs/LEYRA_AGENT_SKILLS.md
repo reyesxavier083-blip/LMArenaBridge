@@ -83,3 +83,23 @@ provider routes and credentials are unchanged. The caller/agent runtime should
 place the catalog in its session context, activate a relevant skill when needed,
 and fetch referenced resources individually. Project skill trust must be an
 explicit local configuration decision.
+
+
+## Automatic activation during chat
+
+The FastAPI `/leyra/v1/chat/completions` route now integrates the catalog into
+non-streaming model requests. When skills are installed, LEYRA adds a compact
+system-context catalog and two OpenAI-compatible function tools:
+
+- `leyra_activate_skill(name)`: loads one skill's instructions and lists its resources.
+- `leyra_read_skill_resource(name, path)`: reads one resource from that skill.
+
+The model chooses when to call these functions. LEYRA executes only these two
+read-only local functions, returns their results to the model, and allows up to
+four skill-tool rounds per request. It does not execute scripts from skill folders.
+Existing caller tools are preserved; a mixed batch containing external tool calls
+is not partially executed by the local skill runtime.
+
+Streaming requests remain unchanged byte-for-byte and therefore do not receive
+automatic skill activation in this release. Use the explicit skill endpoints for
+streaming clients until a streaming-aware tool-call loop is added.
