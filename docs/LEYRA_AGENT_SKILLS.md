@@ -123,3 +123,29 @@ con `LEYRA_SKILLS_STATE_FILE`. Las habilidades desactivadas desaparecen del
 catálogo de razonamiento y no pueden ser activadas por el ciclo automático.
 La administración solo cambia el estado de habilidades descubiertas; no instala
 paquetes ni ejecuta scripts.
+
+
+## Instalación de paquetes ZIP
+
+La API autenticada permite instalar un paquete Agent Skills ZIP revisado por el usuario:
+
+`POST /leyra/v1/skills/install`
+
+Envía el ZIP como cuerpo binario con `Content-Type: application/zip` y el Bearer token del gateway. El archivo debe contener exactamente un `SKILL.md`, directamente en la raíz o dentro de una única carpeta de habilidad. LEYRA valida el nombre y el frontmatter antes de instalarlo en `~/.agents/skills/{name}`.
+
+Límites y protecciones:
+
+- Máximo 5 MiB de carga, 100 entradas y 5 MiB descomprimidos.
+- Rechaza rutas absolutas, traversal, enlaces simbólicos, ratios de compresión excesivos y ZIP inválidos.
+- No sobrescribe una habilidad ya instalada; responde con conflicto HTTP 409.
+- Los archivos `scripts/` se almacenan como recursos, pero nunca se ejecutan.
+- La instalación solo ocurre tras una petición autenticada explícita; no se descargan ni instalan paquetes remotos automáticamente.
+
+Ejemplo:
+
+```bash
+curl -X POST http://127.0.0.1:8000/leyra/v1/skills/install \
+  -H "Authorization: Bearer $LEYRA_GATEWAY_TOKEN" \
+  -H "Content-Type: application/zip" \
+  --data-binary @mi-habilidad.zip
+```
