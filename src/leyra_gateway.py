@@ -15,9 +15,9 @@ from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
-from .leyra_skills import activate_skill, discover_skills, read_skill_resource, skill_catalog
+from .leyra_skills import activate_skill, discover_skills, managed_skill_catalog, read_skill_resource, set_skill_enabled, skill_catalog
 
 
 @dataclass(frozen=True)
@@ -411,6 +411,64 @@ async def chat_completions(request: Request) -> Response:
     finally:
         if not streaming_handed_off:
             await client.aclose()
+
+
+
+@router.get("/skills", response_class=HTMLResponse)
+async def skills_management_page() -> HTMLResponse:
+    """Serve a small local control panel; the gateway token is entered per session."""
+    return HTMLResponse("""<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LEYRA IA · Skills</title><style>
+:root{color-scheme:dark;font-family:Inter,system-ui,sans-serif;background:#080d18;color:#e8f0ff}
+body{max-width:880px;margin:36px auto;padding:0 18px}h1{letter-spacing:.04em}
+p{color:#9eacc5}.panel,.skill{background:#111b2d;border:1px solid #263b5d;border-radius:14px;padding:16px;margin:12px 0}
+input{box-sizing:border-box;width:100%;padding:12px;border-radius:8px;border:1px solid #385477;background:#081222;color:#fff}
+button{padding:9px 14px;border-radius:8px;border:1px solid #4a78ad;background:#17365b;color:white;cursor:pointer}
+button:disabled{opacity:.5}.top{display:flex;gap:10px;align-items:center}.top input{flex:1}
+.skill{display:flex;justify-content:space-between;gap:18px;align-items:center}.skill p{margin:5px 0 0}
+small{color:#8ca5c9}.status{color:#70e1b4;min-height:1.5em}
+@media(max-width:560px){.skill{align-items:flex-start;flex-direction:column}.top{align-items:stretch;flex-direction:column}}
+</style></head><body>
+<h1>LEYRA IA / Agent Skills</h1><p>Administra las habilidades disponibles para el razonamiento de LEYRA.</p>
+<section class="panel"><label for="token">Token privado del gateway</label><div class="top"><input id="token" type="password" autocomplete="off" placeholder="Bearer token"><button id="load">Cargar habilidades</button></div><p class="status" id="status" role="status"></p></section>
+<main id="skills"></main>
+<script>
+const token=document.getElementById('token'),status=document.getElementById('status'),list=document.getElementById('skills');
+async function api(path,options={}){const response=await fetch('/leyra/v1/skills'+path,{...options,headers:{Authorization:'Bearer '+token.value,'Content-Type':'application/json',...(options.headers||{})}});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.detail||'Error HTTP '+response.status);return data}
+function render(items){list.replaceChildren();if(!items.length){list.textContent='No hay habilidades disponibles.';return}
+for(const skill of items){const card=document.createElement('section');card.className='skill';const info=document.createElement('div');const title=document.createElement('strong');title.textContent=skill.name;const desc=document.createElement('p');desc.textContent=skill.description;const scope=document.createElement('small');scope.textContent='Ámbito: '+skill.scope;info.append(title,desc,scope);const button=document.createElement('button');button.textContent=skill.enabled?'Desactivar':'Activar';button.setAttribute('aria-pressed',String(skill.enabled));button.addEventListener('click',async()=>{button.disabled=true;try{await api('/'+encodeURIComponent(skill.name)+'/state',{method:'PUT',body:JSON.stringify({enabled:!skill.enabled})});await load()}catch(e){status.textContent=e.message;button.disabled=false}});card.append(info,button);list.append(card)}}
+async function load(){if(!token.value){status.textContent='Introduce el token del gateway.';return}status.textContent='Cargando…';try{const data=await api('/manage');render(data.data||[]);status.textContent=(data.count||0)+' habilidades encontradas.'}catch(e){status.textContent=e.message}}
+document.getElementById('load').addEventListener('click',load);
+</script></body></html>""")
+
+
+@router.get("/v1/skills/manage")
+async def manage_skills_list(request: Request) -> JSONResponse:
+    settings = get_settings()
+    authorize(request.headers.get("authorization"), settings.gateway_token)
+    catalog = managed_skill_catalog()
+    return JSONResponse({"object": "list", "data": catalog, "count": len(catalog)})
+
+
+@router.put("/v1/skills/{skill_name}/state")
+async def update_skill_state(skill_name: str, request: Request) -> JSONResponse:
+    settings = get_settings()
+    authorize(request.headers.get("authorization"), settings.gateway_token)
+    try:
+        payload = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Request body must be valid JSON.") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("enabled"), bool):
+        raise HTTPException(status_code=400, detail="The enabled field must be a boolean.")
+    available = discover_skills(include_disabled=True)
+    if skill_name not in available:
+        raise HTTPException(status_code=404, detail="Skill not found.")
+    try:
+        set_skill_enabled(skill_name, payload["enabled"])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({"name": skill_name, "enabled": payload["enabled"], "updated": True})
 
 
 @router.get("/v1/skills")
