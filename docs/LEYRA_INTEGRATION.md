@@ -117,3 +117,21 @@ execute bundled scripts. Streaming requests retain the existing raw SSE
 passthrough behavior and do not yet auto-activate skills. See
 [LEYRA_AGENT_SKILLS.md](LEYRA_AGENT_SKILLS.md) for folder layout, trust settings,
 and endpoint details.
+
+
+## Agent Skills management
+
+Open `http://127.0.0.1:8000/leyra/skills` while the FastAPI gateway is running.
+The dashboard accepts the gateway Bearer token for the current page session and
+provides a list with scope and enable/disable controls. The token is not written
+to local storage or cookies.
+
+Authenticated management endpoints:
+
+- `GET /leyra/v1/skills/manage` — list discovered skills and their enabled state.
+- `PUT /leyra/v1/skills/{name}/state` — set `{"enabled": true}` or `false`.
+
+State persists atomically in `~/.leyra/skills-state.json` (override with
+`LEYRA_SKILLS_STATE_FILE`). Disabled skills are excluded from the model catalog
+and cannot be activated by the automatic tool loop. This panel manages discovered
+skills; package installation and script execution are intentionally out of scope.
