@@ -339,10 +339,14 @@ def install_skill_archive(archive_bytes: bytes, home: str | Path | None = None) 
     if len(archive_bytes) > MAX_ARCHIVE_BYTES:
         raise ValueError("Skill archive exceeds the 5 MiB upload limit.")
 
-    destination_root = Path(home or Path.home()).expanduser().resolve() / ".agents" / "skills"
-    destination_root.mkdir(parents=True, exist_ok=True)
+    user_home = Path(home or Path.home()).expanduser().resolve()
+    agents_root = user_home / ".agents"
+    if agents_root.is_symlink():
+        raise ValueError("The .agents directory cannot be a symlink.")
+    destination_root = agents_root / "skills"
     if destination_root.is_symlink():
         raise ValueError("Skill installation directory cannot be a symlink.")
+    destination_root.mkdir(parents=True, exist_ok=True)
 
     try:
         archive = zipfile.ZipFile(io.BytesIO(archive_bytes))
@@ -355,12 +359,13 @@ def install_skill_archive(archive_bytes: bytes, home: str | Path | None = None) 
             raise ValueError("ZIP must contain between 1 and 100 entries.")
         total_size = 0
         normalized: list[tuple[zipfile.ZipInfo, str]] = []
+        seen_paths: set[str] = set()
         for info in entries:
             raw_name = info.filename
             if not raw_name or "\\\\" in raw_name or raw_name.startswith("/"):
                 raise ValueError("ZIP contains an unsafe path.")
             parts = [part for part in raw_name.rstrip("/").split("/") if part]
-            if not parts or any(part in {".", ".."} for part in parts):
+            if not parts or any(part in {".", ".."} or ":" in part for part in parts):
                 raise ValueError("ZIP contains an unsafe path.")
             mode = (info.external_attr >> 16) & 0xFFFF
             if stat.S_ISLNK(mode):
@@ -374,7 +379,11 @@ def install_skill_archive(archive_bytes: bytes, home: str | Path | None = None) 
                 raise ValueError("ZIP contains an invalid compressed entry.")
             if info.compress_size and info.file_size / info.compress_size > 100:
                 raise ValueError("ZIP compression ratio exceeds the safety limit.")
-            normalized.append((info, "/".join(parts)))
+            clean_path = "/".join(parts)
+            if clean_path in seen_paths:
+                raise ValueError("ZIP contains duplicate file paths.")
+            seen_paths.add(clean_path)
+            normalized.append((info, clean_path))
 
         skill_files = [(info, path) for info, path in normalized if path.endswith("/SKILL.md") or path == "SKILL.md"]
         if len(skill_files) != 1:
@@ -400,8 +409,12 @@ def install_skill_archive(archive_bytes: bytes, home: str | Path | None = None) 
                 except ValueError as exc:
                     raise ValueError("ZIP entry escapes the installation directory.") from exc
                 target.parent.mkdir(parents=True, exist_ok=True)
-                with archive.open(info, "r") as source, target.open("xb") as output:
-                    output.write(source.read(MAX_ARCHIVE_UNPACKED_BYTES + 1))
+                with archive.open(info, "r") as source:
+                    content = source.read(MAX_ARCHIVE_UNPACKED_BYTES + 1)
+                if len(content) > MAX_ARCHIVE_UNPACKED_BYTES or len(content) != info.file_size:
+                    raise ValueError("ZIP entry size does not match its declared size.")
+                with target.open("xb") as output:
+                    output.write(content)
             parsed = _read_skill(stage / "SKILL.md", scope="user")
             skill_name = parsed.name
             target_dir = destination_root / skill_name
