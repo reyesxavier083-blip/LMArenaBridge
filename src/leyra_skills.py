@@ -5,8 +5,10 @@ Project skills are trust-gated; user-level skills are available by default.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+import tempfile
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -144,6 +146,7 @@ def discover_skills(
     project_root: str | Path | None = None,
     home: str | Path | None = None,
     include_project: bool | None = None,
+    include_disabled: bool = False,
 ) -> dict[str, Skill]:
     """Discover skills; project scope is disabled until explicitly trusted."""
     project = Path(project_root or os.getenv("LEYRA_PROJECT_ROOT") or Path.cwd()).expanduser().resolve()
@@ -165,6 +168,8 @@ def discover_skills(
                 continue
             if skill.metadata.get("model-invocation-disabled") == "true":
                 continue
+            if not include_disabled and not skill_enabled(skill.name):
+                continue
             if skill.name in found:
                 warnings.warn(
                     f"Skill collision for '{skill.name}'; {scope}-level skill takes precedence.",
@@ -177,6 +182,77 @@ def discover_skills(
                 return found
     return found
 
+
+
+def _settings_file() -> Path:
+    configured = os.getenv("LEYRA_SKILLS_STATE_FILE", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".leyra" / "skills-state.json"
+
+
+def _read_skill_states() -> dict[str, bool]:
+    path = _settings_file()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        warnings.warn(f"Could not read LEYRA skill settings: {exc}", RuntimeWarning, stacklevel=2)
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    states = raw.get("enabled", {})
+    if not isinstance(states, dict):
+        return {}
+    return {
+        key: value for key, value in states.items()
+        if isinstance(key, str) and NAME_RE.fullmatch(key) and isinstance(value, bool)
+    }
+
+
+def skill_enabled(name: str) -> bool:
+    """Return persisted state; skills are enabled by default unless explicitly disabled."""
+    return _read_skill_states().get(name, True)
+
+
+def set_skill_enabled(name: str, enabled: bool) -> None:
+    """Persist a skill's enabled state using an atomic replacement."""
+    if not isinstance(name, str) or not NAME_RE.fullmatch(name):
+        raise ValueError("Invalid skill name.")
+    if not isinstance(enabled, bool):
+        raise ValueError("Enabled state must be a boolean.")
+    path = _settings_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    states = _read_skill_states()
+    states[name] = enabled
+    fd, temporary = tempfile.mkstemp(prefix=".skills-state-", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump({"enabled": states}, stream, ensure_ascii=False, indent=2)
+            stream.write("\\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def managed_skill_catalog(skills: dict[str, Skill] | None = None) -> list[dict[str, Any]]:
+    """Return skill metadata and persisted state for the management interface."""
+    available = skills if skills is not None else discover_skills(include_disabled=True)
+    return [
+        {
+            "name": skill.name,
+            "description": skill.description,
+            "enabled": skill_enabled(skill.name),
+            "scope": "project" if ".agents" in skill.location.parts or ".leyra" in skill.location.parts or ".claude" in skill.location.parts else "user",
+        }
+        for skill in sorted(available.values(), key=lambda item: item.name)
+    ]
 
 def skill_catalog(skills: dict[str, Skill] | None = None) -> list[dict[str, str]]:
     skills = skills if skills is not None else discover_skills()
