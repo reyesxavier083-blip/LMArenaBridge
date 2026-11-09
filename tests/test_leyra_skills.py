@@ -157,3 +157,44 @@ def test_local_skill_tool_rejects_unknown_skill():
 
     result = _run_local_skill_tool("leyra_activate_skill", '{"name":"missing"}')
     assert '"error"' in result
+
+
+
+def test_skill_enable_disable_persists_and_filters_runtime_catalog(monkeypatch, tmp_path):
+    from src.leyra_skills import discover_skills, managed_skill_catalog, set_skill_enabled
+
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    state_file = tmp_path / "settings" / "skills.json"
+    monkeypatch.setenv("LEYRA_SKILLS_STATE_FILE", str(state_file))
+    write_skill(home / ".agents" / "skills", "translate", "translate", "Translate text.")
+
+    enabled = discover_skills(project, home, include_project=False)
+    assert "translate" in enabled
+    set_skill_enabled("translate", False)
+
+    runtime = discover_skills(project, home, include_project=False)
+    assert "translate" not in runtime
+    managed = discover_skills(project, home, include_project=False, include_disabled=True)
+    assert managed_skill_catalog(managed)[0]["enabled"] is False
+
+    set_skill_enabled("translate", True)
+    assert "translate" in discover_skills(project, home, include_project=False)
+
+
+def test_set_skill_enabled_rejects_invalid_names_and_non_boolean_state():
+    from src.leyra_skills import set_skill_enabled
+
+    with pytest.raises(ValueError):
+        set_skill_enabled("../escape", True)
+    with pytest.raises(ValueError):
+        set_skill_enabled("valid-name", "yes")
+
+
+def test_management_routes_are_registered():
+    from src.leyra_gateway import router
+
+    routes = {(route.path, tuple(sorted(route.methods or []))) for route in router.routes}
+    assert ("/leyra/skills", ("GET",)) in routes
+    assert ("/leyra/v1/skills/manage", ("GET",)) in routes
+    assert ("/leyra/v1/skills/{skill_name}/state", ("PUT",)) in routes
