@@ -157,6 +157,7 @@ def discover_skills(
             "1", "true", "yes", "on"
         }
     found: dict[str, Skill] = {}
+    persisted_states = _read_skill_states() if not include_disabled else {}
     # User-level entries are loaded first; trusted project-level entries override them.
     for root, scope in _candidate_roots(project, user_home):
         if scope == "project" and not include_project:
@@ -169,7 +170,7 @@ def discover_skills(
                 continue
             if skill.metadata.get("model-invocation-disabled") == "true":
                 continue
-            if not include_disabled and not skill_enabled(skill.name):
+            if not include_disabled and not persisted_states.get(skill.name, True):
                 continue
             if skill.name in found:
                 warnings.warn(
@@ -245,11 +246,12 @@ def set_skill_enabled(name: str, enabled: bool) -> None:
 def managed_skill_catalog(skills: dict[str, Skill] | None = None) -> list[dict[str, Any]]:
     """Return skill metadata and persisted state for the management interface."""
     available = skills if skills is not None else discover_skills(include_disabled=True)
+    states = _read_skill_states()
     return [
         {
             "name": skill.name,
             "description": skill.description,
-            "enabled": skill_enabled(skill.name),
+            "enabled": states.get(skill.name, True),
             "scope": skill.scope,
         }
         for skill in sorted(available.values(), key=lambda item: item.name)
