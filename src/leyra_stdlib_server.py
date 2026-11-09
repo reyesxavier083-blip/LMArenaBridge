@@ -12,8 +12,10 @@ import signal
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 from urllib.request import Request, urlopen
+
+from .leyra_skills import activate_skill, discover_skills, read_skill_resource, skill_catalog
 
 
 MAX_BODY = 2 * 1024 * 1024
@@ -123,7 +125,8 @@ class Handler(BaseHTTPRequestHandler):
                 })
                 return
 
-            if self.path == "/leyra/v1/models":
+            request_path = urlsplit(self.path).path
+            if request_path == "/leyra/v1/models":
                 try:
                     with provider_request(base, api_key, "models", timeout=timeout) as upstream:
                         data = upstream.read(MAX_BODY + 1)
@@ -139,6 +142,41 @@ class Handler(BaseHTTPRequestHandler):
                     raise GatewayError(502, "The configured provider rejected the models request.")
                 except (URLError, TimeoutError, OSError):
                     raise GatewayError(502, "Could not reach the configured model provider.")
+                return
+
+            if request_path == "/leyra/v1/skills":
+                catalog = skill_catalog(discover_skills())
+                self.send_json(200, {"object": "list", "data": catalog, "count": len(catalog)})
+                return
+
+            parts = request_path.strip("/").split("/")
+            if len(parts) == 5 and parts[:3] == ["leyra", "v1", "skills"] and parts[4] == "activate":
+                name = unquote(parts[3])
+                try:
+                    result = activate_skill(name)
+                except KeyError:
+                    raise GatewayError(404, "Skill not found or not available.")
+                except ValueError as exc:
+                    raise GatewayError(400, str(exc))
+                self.send_json(200, result)
+                return
+
+            if len(parts) >= 6 and parts[:3] == ["leyra", "v1", "skills"] and parts[4] == "resources":
+                name = unquote(parts[3])
+                resource_path = unquote("/".join(parts[5:]))
+                try:
+                    content = read_skill_resource(name, resource_path)
+                except (KeyError, FileNotFoundError):
+                    raise GatewayError(404, "Skill resource not found.")
+                except ValueError as exc:
+                    raise GatewayError(400, str(exc))
+                raw = content.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(raw)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(raw)
                 return
 
             raise GatewayError(404, "Not found.")

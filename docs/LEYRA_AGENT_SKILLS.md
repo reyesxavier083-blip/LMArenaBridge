@@ -1,0 +1,151 @@
+# LEYRA IA — Agent Skills
+
+LEYRA supports the open [Agent Skills](https://agentskills.io) folder format through
+progressive disclosure. The implementation is provider-neutral and is available in
+both the FastAPI gateway and the Python-standard-library server.
+
+## Loading model
+
+1. **Tier 1 — catalog:** only each skill's `name` and `description` are returned.
+2. **Tier 2 — activation:** the full Markdown body of `SKILL.md` is returned only
+   when the skill is activated.
+3. **Tier 3 — resources:** scripts, references, and assets are listed at activation
+   and fetched individually when needed. They are not eagerly loaded.
+
+A skill directory contains a `SKILL.md` file with YAML frontmatter:
+
+```yaml
+---
+name: code-review
+description: Review code for correctness, security, and maintainability.
+---
+# Code review
+Follow the project's conventions and report actionable findings.
+```
+
+Optional sibling directories such as `scripts/`, `references/`, and `assets/`
+are supported.
+
+## Discovery locations
+
+LEYRA scans these directories:
+
+- Project: `.agents/skills/`, `.leyra/skills/`, `.claude/skills/`
+- User: `~/.agents/skills/`, `~/.leyra/skills/`, `~/.claude/skills/`
+- Additional user-managed roots: `LEYRA_SKILLS_PATHS` (path-separated list)
+
+Project skills are **disabled by default** because repository content can be
+untrusted. Enable them only for a project you trust:
+
+```bash
+export LEYRA_TRUST_PROJECT_SKILLS=true
+```
+
+Project-level skills override user-level skills with the same name. Collisions and
+malformed skills emit warnings. Scanning skips common generated directories,
+does not follow symlinks, and applies depth, directory, skill-count, and file-size
+limits. If PyYAML is installed it is used for frontmatter; otherwise LEYRA uses a
+small standard-library parser for common frontmatter fields.
+
+## Authenticated API
+
+All routes below require the existing LEYRA Bearer token.
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/leyra/v1/skills` | Tier-1 metadata catalog |
+| GET | `/leyra/v1/skills/{name}/activate` | Tier-2 instructions and tier-3 resource listing |
+| GET | `/leyra/v1/skills/{name}/resources/{path}` | Read one resource from the selected skill |
+
+Example:
+
+```bash
+curl http://127.0.0.1:8000/leyra/v1/skills \
+  -H "Authorization: Bearer $LEYRA_GATEWAY_TOKEN"
+
+curl http://127.0.0.1:8000/leyra/v1/skills/code-review/activate \
+  -H "Authorization: Bearer $LEYRA_GATEWAY_TOKEN"
+
+curl http://127.0.0.1:8000/leyra/v1/skills/code-review/resources/references/checklist.md \
+  -H "Authorization: Bearer $LEYRA_GATEWAY_TOKEN"
+```
+
+The resource endpoint blocks path traversal and symlink escapes. Skill content is
+untrusted input: the model/runtime must treat it as task guidance, never as
+higher-priority system policy or permission to reveal secrets or perform unsafe
+actions. The gateway does not execute bundled scripts automatically.
+
+## Runtime integration notes
+
+The endpoints are available in both `src/leyra_gateway.py` (FastAPI) and
+`src/leyra_stdlib_server.py` (Termux-friendly standard library mode). Existing
+provider routes and credentials are unchanged. The caller/agent runtime should
+place the catalog in its session context, activate a relevant skill when needed,
+and fetch referenced resources individually. Project skill trust must be an
+explicit local configuration decision.
+
+
+## Automatic activation during chat
+
+The FastAPI `/leyra/v1/chat/completions` route now integrates the catalog into
+non-streaming model requests. When skills are installed, LEYRA adds a compact
+system-context catalog and two OpenAI-compatible function tools:
+
+- `leyra_activate_skill(name)`: loads one skill's instructions and lists its resources.
+- `leyra_read_skill_resource(name, path)`: reads one resource from that skill.
+
+The model chooses when to call these functions. LEYRA executes only these two
+read-only local functions, returns their results to the model, and allows up to
+four skill-tool rounds per request. It does not execute scripts from skill folders.
+Existing caller tools are preserved; a mixed batch containing external tool calls
+is not partially executed by the local skill runtime.
+
+Streaming requests remain unchanged byte-for-byte and therefore do not receive
+automatic skill activation in this release. Use the explicit skill endpoints for
+streaming clients until a streaming-aware tool-call loop is added.
+
+
+## Gestión desde la interfaz
+
+Abre `/leyra/skills` en el mismo host del gateway para administrar habilidades.
+La página solicita el token privado cada vez y no lo guarda en almacenamiento del
+navegador. Permite consultar el catálogo y activar/desactivar habilidades.
+
+API de administración (requiere Bearer token):
+
+| Método | Ruta | Función |
+|---|---|---|
+| GET | `/leyra/v1/skills/manage` | Catálogo con estado activado/desactivado |
+| PUT | `/leyra/v1/skills/{name}/state` | Persistir el estado; cuerpo `{"enabled": true}` o `false` |
+
+El estado se guarda en `~/.leyra/skills-state.json`. Puedes cambiar la ubicación
+con `LEYRA_SKILLS_STATE_FILE`. Las habilidades desactivadas desaparecen del
+catálogo de razonamiento y no pueden ser activadas por el ciclo automático.
+La administración solo cambia el estado de habilidades descubiertas; no instala
+paquetes ni ejecuta scripts.
+
+
+## Instalación de paquetes ZIP
+
+La API autenticada permite instalar un paquete Agent Skills ZIP revisado por el usuario:
+
+`POST /leyra/v1/skills/install`
+
+Envía el ZIP como cuerpo binario con `Content-Type: application/zip` y el Bearer token del gateway. El archivo debe contener exactamente un `SKILL.md`, directamente en la raíz o dentro de una única carpeta de habilidad. LEYRA valida el nombre y el frontmatter antes de instalarlo en `~/.agents/skills/{name}`.
+
+Límites y protecciones:
+
+- Máximo 5 MiB de carga, 100 entradas y 5 MiB descomprimidos.
+- Rechaza rutas absolutas, traversal, enlaces simbólicos, ratios de compresión excesivos y ZIP inválidos.
+- No sobrescribe una habilidad ya instalada; responde con conflicto HTTP 409.
+- Los archivos `scripts/` se almacenan como recursos, pero nunca se ejecutan.
+- La instalación solo ocurre tras una petición autenticada explícita; no se descargan ni instalan paquetes remotos automáticamente.
+
+Ejemplo:
+
+```bash
+curl -X POST http://127.0.0.1:8000/leyra/v1/skills/install \
+  -H "Authorization: Bearer $LEYRA_GATEWAY_TOKEN" \
+  -H "Content-Type: application/zip" \
+  --data-binary @mi-habilidad.zip
+```

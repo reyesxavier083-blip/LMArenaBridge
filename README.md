@@ -168,6 +168,13 @@ El servidor principal importa y monta también las rutas del gateway LEYRA bajo 
 - El gateway limita el cuerpo de cada solicitud a 2 MiB y a 100 mensajes.
 - El gateway LEYRA no resuelve desafíos, no extrae cookies y no automatiza sesiones de terceros.
 
+## Agent Skills para LEYRA IA
+
+LEYRA incorpora el estándar abierto Agent Skills con carga progresiva de catálogo,
+instrucciones y recursos. Consulta [docs/LEYRA_AGENT_SKILLS.md](docs/LEYRA_AGENT_SKILLS.md)
+para configurar las carpetas, habilitar proyectos de confianza, administrar las habilidades
+desde `http://127.0.0.1:8000/leyra/skills` y utilizar su API autenticada.
+
 ## Pruebas
 
 Instala las dependencias de desarrollo y ejecuta:
