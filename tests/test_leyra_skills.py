@@ -74,3 +74,86 @@ def test_skills_api_routes_are_registered():
     assert "/leyra/v1/skills" in paths
     assert "/leyra/v1/skills/{skill_name}/activate" in paths
     assert "/leyra/v1/skills/{skill_name}/resources/{resource_path:path}" in paths
+
+
+
+def test_chat_payload_discloses_catalog_and_registers_skill_tools(monkeypatch, tmp_path):
+    from src import leyra_gateway
+    from src.leyra_skills import discover_skills
+
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    write_skill(home / ".agents" / "skills", "summarize", "summarize", "Summarize long text.")
+    skills = discover_skills(project, home, include_project=False)
+    monkeypatch.setattr(leyra_gateway, "discover_skills", lambda: skills)
+
+    payload = leyra_gateway._prepare_skill_aware_payload({
+        "model": "test-model",
+        "messages": [{"role": "user", "content": "Summarize this."}],
+    })
+
+    assert payload["messages"][0]["role"] == "system"
+    assert "summarize" in payload["messages"][0]["content"]
+    names = {item["function"]["name"] for item in payload["tools"]}
+    assert "leyra_activate_skill" in names
+    assert "leyra_read_skill_resource" in names
+    assert payload["tool_choice"] == "auto"
+
+
+def test_chat_payload_preserves_existing_system_prompt_and_tools(monkeypatch, tmp_path):
+    from src import leyra_gateway
+
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    write_skill(home / ".agents" / "skills", "review", "review", "Review code.")
+    skills = discover_skills(project, home, include_project=False)
+    monkeypatch.setattr(leyra_gateway, "discover_skills", lambda: skills)
+
+    payload = leyra_gateway._prepare_skill_aware_payload({
+        "model": "test-model",
+        "messages": [{"role": "system", "content": "Keep answers concise."},
+                     {"role": "user", "content": "Review this."}],
+        "tools": [{"type": "function", "function": {
+            "name": "existing_tool", "description": "Existing tool",
+            "parameters": {"type": "object", "properties": {}}
+        }}],
+    })
+
+    assert "Keep answers concise." in payload["messages"][0]["content"]
+    names = {item["function"]["name"] for item in payload["tools"]}
+    assert "existing_tool" in names
+    assert "leyra_activate_skill" in names
+
+
+def test_local_skill_tool_activation_and_resource_read(tmp_path):
+    from src.leyra_gateway import _run_local_skill_tool
+
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    directory = write_skill(home / ".agents" / "skills", "docs", "docs", "Read docs.")
+    (directory / "references").mkdir()
+    (directory / "references" / "guide.md").write_text("Reference guide.", encoding="utf-8")
+
+    import os
+    old_home = os.environ.get("HOME")
+    os.environ["HOME"] = str(home)
+    try:
+        activated = _run_local_skill_tool("leyra_activate_skill", '{"name":"docs"}')
+        assert '"instructions": "Instructions."' in activated
+        resource = _run_local_skill_tool(
+            "leyra_read_skill_resource",
+            '{"name":"docs","path":"references/guide.md"}',
+        )
+        assert "Reference guide." in resource
+    finally:
+        if old_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = old_home
+
+
+def test_local_skill_tool_rejects_unknown_skill():
+    from src.leyra_gateway import _run_local_skill_tool
+
+    result = _run_local_skill_tool("leyra_activate_skill", '{"name":"missing"}')
+    assert '"error"' in result
