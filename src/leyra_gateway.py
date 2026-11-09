@@ -17,6 +17,8 @@ import httpx
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from .leyra_skills import activate_skill, discover_skills, read_skill_resource, skill_catalog
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -243,6 +245,45 @@ async def chat_completions(request: Request) -> Response:
     finally:
         if not streaming_handed_off:
             await client.aclose()
+
+
+@router.get("/v1/skills")
+async def list_skills(request: Request) -> JSONResponse:
+    """Return tier-1 Agent Skills metadata without loading instructions into the response."""
+    settings = get_settings()
+    authorize(request.headers.get("authorization"), settings.gateway_token)
+    catalog = skill_catalog(discover_skills())
+    return JSONResponse({"object": "list", "data": catalog, "count": len(catalog)})
+
+
+@router.get("/v1/skills/{skill_name}/activate")
+async def activate_leyra_skill(skill_name: str, request: Request) -> JSONResponse:
+    """Load tier-2 SKILL.md instructions and list tier-3 resources on demand."""
+    settings = get_settings()
+    authorize(request.headers.get("authorization"), settings.gateway_token)
+    try:
+        result = activate_skill(skill_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found or not available.") from exc
+    return JSONResponse(result)
+
+
+@router.get("/v1/skills/{skill_name}/resources/{resource_path:path}")
+async def get_leyra_skill_resource(
+    skill_name: str, resource_path: str, request: Request
+) -> Response:
+    """Read one tier-3 resource, constrained to the selected skill directory."""
+    settings = get_settings()
+    authorize(request.headers.get("authorization"), settings.gateway_token)
+    try:
+        content = read_skill_resource(skill_name, resource_path)
+    except (ValueError, UnicodeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (KeyError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail="Skill resource not found.") from exc
+    return Response(content=content, media_type="text/plain; charset=utf-8")
 
 
 # Standalone development app; the main LMArenaBridge app mounts the same router.
