@@ -30,6 +30,7 @@ class Skill:
     location: Path
     body: str
     metadata: dict[str, str]
+    scope: str = "user"
 
     @property
     def directory(self) -> Path:
@@ -80,7 +81,7 @@ def _parse_frontmatter(raw: str) -> tuple[dict[str, Any], str]:
     return data, body
 
 
-def _read_skill(skill_file: Path) -> Skill:
+def _read_skill(skill_file: Path, scope: str = "user") -> Skill:
     if skill_file.is_symlink() or not skill_file.is_file():
         raise ValueError("SKILL.md must be a regular file.")
     if skill_file.stat().st_size > MAX_SKILL_BYTES:
@@ -103,7 +104,7 @@ def _read_skill(skill_file: Path) -> Skill:
     metadata = {str(k): str(v) for k, v in metadata.items()}
     if metadata.get("disable-model-invocation", "").lower() == "true":
         metadata["model-invocation-disabled"] = "true"
-    return Skill(name, description.strip(), skill_file.resolve(), body, metadata)
+    return Skill(name, description.strip(), skill_file.resolve(), body, metadata, scope)
 
 
 def _candidate_roots(project_root: Path, home: Path) -> list[tuple[Path, str]]:
@@ -162,7 +163,7 @@ def discover_skills(
             continue
         for skill_file in _iter_skill_files(root) or ():
             try:
-                skill = _read_skill(skill_file)
+                skill = _read_skill(skill_file, scope=scope)
             except (OSError, UnicodeError, ValueError) as exc:
                 warnings.warn(f"Skipping invalid skill at {skill_file}: {exc}", RuntimeWarning, stacklevel=2)
                 continue
@@ -249,7 +250,7 @@ def managed_skill_catalog(skills: dict[str, Skill] | None = None) -> list[dict[s
             "name": skill.name,
             "description": skill.description,
             "enabled": skill_enabled(skill.name),
-            "scope": "project" if ".agents" in skill.location.parts or ".leyra" in skill.location.parts or ".claude" in skill.location.parts else "user",
+            "scope": skill.scope,
         }
         for skill in sorted(available.values(), key=lambda item: item.name)
     ]
