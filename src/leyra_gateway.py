@@ -17,7 +17,7 @@ import httpx
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
-from .leyra_skills import activate_skill, discover_skills, managed_skill_catalog, read_skill_resource, set_skill_enabled, skill_catalog
+from .leyra_skills import activate_skill, discover_skills, install_skill_archive, managed_skill_catalog, read_skill_resource, set_skill_enabled, skill_catalog
 
 
 @dataclass(frozen=True)
@@ -469,6 +469,29 @@ async def update_skill_state(skill_name: str, request: Request) -> JSONResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse({"name": skill_name, "enabled": payload["enabled"], "updated": True})
+
+
+
+@router.post("/v1/skills/install")
+async def install_leyra_skill(request: Request) -> JSONResponse:
+    """Install one user-reviewed Agent Skills ZIP; archive contents are never executed."""
+    settings = get_settings()
+    authorize(request.headers.get("authorization"), settings.gateway_token)
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type != "application/zip":
+        raise HTTPException(status_code=415, detail="Send a ZIP archive with Content-Type: application/zip.")
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > 5 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Skill archive exceeds the 5 MiB upload limit.")
+        body.extend(chunk)
+    try:
+        result = install_skill_archive(bytes(body))
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (ValueError, OSError, UnicodeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({"installed": True, "skill": result}, status_code=201)
 
 
 @router.get("/v1/skills")
