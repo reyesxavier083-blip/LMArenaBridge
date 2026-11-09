@@ -107,9 +107,9 @@ def _read_skill(skill_file: Path) -> Skill:
 def _candidate_roots(project_root: Path, home: Path) -> list[tuple[Path, str]]:
     roots: list[tuple[Path, str]] = []
     for relative in (".agents/skills", ".leyra/skills", ".claude/skills"):
-        roots.append((project_root / relative, "project"))
-    for relative in (".agents/skills", ".leyra/skills", ".claude/skills"):
         roots.append((home / relative, "user"))
+    for relative in (".agents/skills", ".leyra/skills", ".claude/skills"):
+        roots.append((project_root / relative, "project"))
     extra = os.getenv("LEYRA_SKILLS_PATHS", "")
     for item in extra.split(os.pathsep):
         if item.strip():
