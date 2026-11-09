@@ -103,3 +103,23 @@ is not partially executed by the local skill runtime.
 Streaming requests remain unchanged byte-for-byte and therefore do not receive
 automatic skill activation in this release. Use the explicit skill endpoints for
 streaming clients until a streaming-aware tool-call loop is added.
+
+
+## Gestión desde la interfaz
+
+Abre `/leyra/skills` en el mismo host del gateway para administrar habilidades.
+La página solicita el token privado cada vez y no lo guarda en almacenamiento del
+navegador. Permite consultar el catálogo y activar/desactivar habilidades.
+
+API de administración (requiere Bearer token):
+
+| Método | Ruta | Función |
+|---|---|---|
+| GET | `/leyra/v1/skills/manage` | Catálogo con estado activado/desactivado |
+| PUT | `/leyra/v1/skills/{name}/state` | Persistir el estado; cuerpo `{"enabled": true}` o `false` |
+
+El estado se guarda en `~/.leyra/skills-state.json`. Puedes cambiar la ubicación
+con `LEYRA_SKILLS_STATE_FILE`. Las habilidades desactivadas desaparecen del
+catálogo de razonamiento y no pueden ser activadas por el ciclo automático.
+La administración solo cambia el estado de habilidades descubiertas; no instala
+paquetes ni ejecuta scripts.
