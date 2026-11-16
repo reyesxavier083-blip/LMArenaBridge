@@ -215,9 +215,11 @@ def test_get_settings_rejects_provider_url_with_query(monkeypatch):
 
 
 def test_gateway_app_exposes_connection_test_route():
-    from src.leyra_gateway import app
+    # Inspect the declared router directly. Newer FastAPI releases may keep
+    # included routers as lazy _IncludedRouter objects in app.routes.
+    from src.leyra_gateway import router
 
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in router.routes if hasattr(route, "path")}
     assert "/leyra/health" in paths
     assert "/leyra/connection/test" in paths
     assert "/leyra/v1/models" in paths

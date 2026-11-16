@@ -149,3 +149,36 @@ curl -X POST http://127.0.0.1:8000/leyra/v1/skills/install \
   -H "Content-Type: application/zip" \
   --data-binary @mi-habilidad.zip
 ```
+
+## Skillet hosted MCP (read-only)
+
+LEYRA can connect to the user's own Skillet kit through its hosted Streamable HTTP
+MCP link. The credential is a read-only `skillet_m_` token. Configure the complete
+private link only in the deployment environment; never commit it to the repository,
+place it in client-side code, or print it in logs:
+
+```bash
+LEYRA_SKILLET_MCP_URL=https://registry.skillet.md/api/v1/mcp/<private-link-token>
+```
+
+The gateway accepts only HTTPS links on `registry.skillet.md` under
+`/api/v1/mcp/`, disables redirects, and uses the token-bearing URL only on the
+server. Rotate the MCP link in Skillet Settings → Account if it is exposed.
+
+Authenticated gateway endpoints:
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/leyra/v1/skillet/skills` | List the connected kit's approved skills |
+| GET | `/leyra/v1/skillet/skills/{slug}` | Load one approved skill and its resources |
+
+During non-streaming chat, LEYRA exposes three bounded model tools:
+`leyra_skillet_list_skills`, `leyra_skillet_search_skills`, and
+`leyra_skillet_get_skill`. They are added only when the private MCP link is
+configured. The client performs the MCP initialize handshake and read-only
+`tools/call` requests. No publishing, syncing, or write operation is exposed.
+Remote skill text is untrusted task data; scripts are never executed.
+
+Streaming chat remains pass-through and does not automatically invoke local or
+remote skills in this release. Use the authenticated gateway endpoints for
+streaming clients.
