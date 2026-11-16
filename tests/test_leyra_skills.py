@@ -222,7 +222,7 @@ def test_install_skill_archive_accepts_valid_skill_zip(tmp_path):
 
     data = io.BytesIO()
     with zipfile.ZipFile(data, "w") as archive:
-        archive.writestr("hello/SKILL.md", "---\\nname: hello\\ndescription: Hello skill\\n---\\n\\nDo useful work.")
+        archive.writestr("hello/SKILL.md", "---\nname: hello\ndescription: Hello skill\n---\n\nDo useful work.")
         archive.writestr("hello/references/guide.md", "Reference.")
         archive.writestr("hello/scripts/check.py", "print('not executed')")
     result = install_skill_archive(data.getvalue(), tmp_path)
@@ -239,7 +239,7 @@ def test_install_skill_archive_rejects_traversal(tmp_path):
 
     data = io.BytesIO()
     with zipfile.ZipFile(data, "w") as archive:
-        archive.writestr("safe/SKILL.md", "---\\nname: safe\\ndescription: Safe\\n---\\n")
+        archive.writestr("safe/SKILL.md", "---\nname: safe\ndescription: Safe\n---\n")
         archive.writestr("safe/../../escape.txt", "nope")
     with pytest.raises(ValueError):
         install_skill_archive(data.getvalue(), tmp_path)
@@ -253,7 +253,7 @@ def test_install_skill_archive_rejects_duplicate_skill(tmp_path):
 
     data = io.BytesIO()
     with zipfile.ZipFile(data, "w") as archive:
-        archive.writestr("repeat/SKILL.md", "---\\nname: repeat\\ndescription: Repeat\\n---\\n")
+        archive.writestr("repeat/SKILL.md", "---\nname: repeat\ndescription: Repeat\n---\n")
     install_skill_archive(data.getvalue(), tmp_path)
     with pytest.raises(FileExistsError):
         install_skill_archive(data.getvalue(), tmp_path)
