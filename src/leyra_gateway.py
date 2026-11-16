@@ -85,7 +85,7 @@ def upstream_headers(settings: Settings) -> dict[str, str]:
 
 
 def upstream_url(settings: Settings, path: str) -> str:
-    return f"{settings.upstream_base_url}/{path.lstrip('/')}"
+    return f"{settings.upstream_base_url.rstrip('/')}/{path.lstrip('/')}"
 
 
 app = FastAPI(
