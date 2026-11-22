@@ -78,6 +78,19 @@ class Handler(BaseHTTPRequestHandler):
         # Avoid logging headers, tokens, request bodies, or provider responses.
         sys.stderr.write("[LEYRA] " + (fmt % args) + "\n")
 
+    def end_headers(self) -> None:
+        # Allow browser clients on other origins to call the token-protected API.
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+        self.send_header("Access-Control-Max-Age", "600")
+        super().end_headers()
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def send_json(self, status: int, payload: dict) -> None:
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -95,7 +108,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         try:
-            if self.path == "/leyra/health":
+            if self.path in {"/health", "/leyra/health"}:
                 configured = bool(os.getenv("LEYRA_UPSTREAM_BASE_URL", "").strip()
                                   and os.getenv("LEYRA_GATEWAY_TOKEN", "").strip())
                 self.send_json(200, {
@@ -107,7 +120,7 @@ class Handler(BaseHTTPRequestHandler):
             base, token, api_key, timeout = self.require_settings()
             auth(self, token)
 
-            if self.path == "/leyra/connection/test":
+            if self.path in {"/openai/status", "/leyra/connection/test"}:
                 endpoint = "models"
                 try:
                     with provider_request(base, api_key, endpoint, timeout=timeout) as upstream:
