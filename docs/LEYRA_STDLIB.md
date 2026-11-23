@@ -36,3 +36,13 @@ El gateway exige HTTPS para el proveedor; HTTP solo se permite cuando el proveed
 Este modo implementa el transporte HTTP del gateway con módulos estándar de Python. No cambia el bridge principal de LMArena ni instala ni ejecuta automatización de navegador. El servidor local escucha en `127.0.0.1` de forma predeterminada.
 
 Este servidor sencillo está pensado para pruebas y uso local. La documentación oficial de Python advierte que `http.server` no es una solución de producción; no lo expongas directamente a Internet. Para despliegues públicos, usa un servidor de producción detrás de HTTPS y controles de acceso adecuados.
+
+
+## OpenAI Ads Conversions (validación sin persistencia)
+
+Consulta [OPENAI_ADS_CONVERSIONS.md](OPENAI_ADS_CONVERSIONS.md) para las rutas de vista previa y validación remota. Configura `OPENAI_CONVERSIONS_API_KEY`, `OPENAI_ADS_PIXEL_ID` y `LEYRA_OPENAI_ADS_ENABLED=true` únicamente en el entorno privado del servidor. La opción permanece desactivada por defecto.
+
+- `POST /leyra/integrations/ads/conversions/preview`: validación local, sin contactar al proveedor.
+- `POST /leyra/integrations/ads/conversions/validate`: validación remota con `validate_only=true`; no registra conversiones.
+
+Ambas rutas requieren el token Bearer de LEYRA. No aceptan identificadores de usuario. No se debe enviar ningún evento sin consentimiento válido y base legal confirmada. No existe una ruta de persistencia de conversiones en esta integración.
