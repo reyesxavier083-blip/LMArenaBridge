@@ -5,7 +5,6 @@ validate_only=true. Credentials are read only from the server environment.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -34,14 +33,6 @@ EVENT_DATA_TYPES = {
 EVENT_FIELDS = {
     "id", "type", "timestamp_ms", "custom_event_name", "oppref",
     "source_url", "action_source", "user", "opt_out", "data",
-}
-HASHED_USER_FIELDS = {
-    "phone_numbers_sha256", "emails_sha256", "external_ids_sha256",
-    "first_names_sha256", "last_names_sha256",
-}
-USER_FIELDS = HASHED_USER_FIELDS | {
-    "obref", "countries", "cities", "regions", "postal_codes",
-    "android_advertising_id", "ip_address", "user_agent",
 }
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 CUSTOM_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,62}[A-Za-z0-9]$|^[A-Za-z0-9]$")
@@ -106,18 +97,13 @@ def validate_events(events: object) -> list[dict]:
                 raise AdsValidationError("custom events require a valid custom_event_name")
         elif "custom_event_name" in event:
             raise AdsValidationError("custom_event_name is only valid for custom events")
-        if "opt_out" in event and not isinstance(event["opt_out"], bool):
-            raise AdsValidationError("opt_out must be a boolean")
+        if "opt_out" in event:
+            if not isinstance(event["opt_out"], bool):
+                raise AdsValidationError("opt_out must be a boolean")
+            if event["opt_out"]:
+                raise AdsValidationError("opted-out events must never be transmitted")
         if "user" in event:
-            user = event["user"]
-            if not isinstance(user, dict) or set(user) - USER_FIELDS:
-                raise AdsValidationError("user contains unsupported identifier fields")
-            for field in HASHED_USER_FIELDS.intersection(user):
-                values = user[field]
-                if not isinstance(values, list) or len(values) > 3 or any(
-                    not isinstance(value, str) or not HASH_RE.fullmatch(value) for value in values
-                ):
-                    raise AdsValidationError("user hashed identifiers must be lowercase SHA-256 digests")
+            raise AdsValidationError("user identifiers are disabled in this privacy-minimized integration")
         result.append(dict(event))
     return result
 
