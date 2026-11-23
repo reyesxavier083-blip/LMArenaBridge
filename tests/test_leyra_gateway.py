@@ -269,3 +269,72 @@ async def test_chat_endpoint_rejects_more_than_100_messages(monkeypatch):
             },
         )
     assert response.status_code == 413
+
+
+def _openai_ads_test_event():
+    from datetime import datetime, timezone
+
+    return {
+        "id": "ads-test-event-001",
+        "type": "registration_completed",
+        "timestamp_ms": int(datetime.now(timezone.utc).timestamp() * 1000),
+        "action_source": "web",
+        "source_url": "https://example.com/signup/complete",
+        "data": {"type": "customer_action"},
+    }
+
+
+def test_openai_ads_adapter_validates_event_batch():
+    from src.openai_ads_conversions import validate_events
+
+    assert len(validate_events([_openai_ads_test_event()])) == 1
+
+
+def test_openai_ads_adapter_rejects_duplicate_ids():
+    from src.openai_ads_conversions import AdsValidationError, validate_events
+
+    event = _openai_ads_test_event()
+    with pytest.raises(AdsValidationError):
+        validate_events([event, dict(event)])
+
+
+def test_openai_ads_adapter_rejects_user_identifiers():
+    from src.openai_ads_conversions import AdsValidationError, validate_events
+
+    event = _openai_ads_test_event()
+    event["user"] = {"emails_sha256": ["a" * 64]}
+    with pytest.raises(AdsValidationError):
+        validate_events([event])
+
+
+def test_openai_ads_adapter_rejects_opted_out_events():
+    from src.openai_ads_conversions import AdsValidationError, validate_events
+
+    event = _openai_ads_test_event()
+    event["opt_out"] = True
+    with pytest.raises(AdsValidationError):
+        validate_events([event])
+
+
+def test_openai_ads_remote_validation_always_sets_validate_only(monkeypatch):
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from src.openai_ads_conversions import validate_remotely
+
+    monkeypatch.setenv("LEYRA_OPENAI_ADS_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_CONVERSIONS_API_KEY", "test-secret")
+    monkeypatch.setenv("OPENAI_ADS_PIXEL_ID", "test-pixel")
+    response = MagicMock()
+    response.status = 200
+    response.read.return_value = b'{"valid":true}'
+    response.__enter__.return_value = response
+    response.__exit__.return_value = False
+
+    with patch("src.openai_ads_conversions.urlopen", return_value=response) as mocked:
+        result = validate_remotely([_openai_ads_test_event()])
+    request = mocked.call_args.args[0]
+    payload = json.loads(request.data.decode("utf-8"))
+    assert payload["validate_only"] is True
+    assert "pid=test-pixel" in request.full_url
+    assert result["provider_contacted"] is True
