@@ -34,7 +34,6 @@ EVENT_FIELDS = {
     "id", "type", "timestamp_ms", "custom_event_name", "oppref",
     "source_url", "action_source", "user", "opt_out", "data",
 }
-HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 CUSTOM_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,62}[A-Za-z0-9]$|^[A-Za-z0-9]$")
 
 
