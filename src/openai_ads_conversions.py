@@ -59,7 +59,7 @@ def validate_events(events: object) -> list[dict]:
         if not isinstance(event_id, str) or not event_id.strip() or event_id in ids:
             raise AdsValidationError("event id must be non-empty and unique within the batch")
         ids.add(event_id)
-        if event_type not in EVENT_DATA_TYPES:
+        if not isinstance(event_type, str) or event_type not in EVENT_DATA_TYPES:
             raise AdsValidationError("unsupported conversion event type")
         timestamp = event.get("timestamp_ms")
         if isinstance(timestamp, bool) or not isinstance(timestamp, int):
@@ -71,13 +71,16 @@ def validate_events(events: object) -> list[dict]:
         if event_time < now - timedelta(days=7) or event_time > now + timedelta(minutes=10):
             raise AdsValidationError("timestamp_ms must be within the last 7 days and at most 10 minutes ahead")
         source = event.get("action_source")
-        if source not in {"web", "mobile_app", "offline", "physical_store", "phone_call", "email", "other"}:
+        if not isinstance(source, str) or source not in {"web", "mobile_app", "offline", "physical_store", "phone_call", "email", "other"}:
             raise AdsValidationError("action_source is required and unsupported")
         if event_type in {"app_installed", "app_opened"} and source != "mobile_app":
             raise AdsValidationError("app lifecycle events require mobile_app action_source")
         if source == "web":
             from urllib.parse import urlsplit
-            parsed = urlsplit(event.get("source_url", ""))
+            source_url = event.get("source_url")
+            if not isinstance(source_url, str):
+                raise AdsValidationError("web events require a valid source_url")
+            parsed = urlsplit(source_url)
             if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
                 raise AdsValidationError("web events require a valid source_url")
         data = event.get("data")
