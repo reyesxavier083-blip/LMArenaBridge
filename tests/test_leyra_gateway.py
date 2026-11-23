@@ -217,7 +217,9 @@ def test_get_settings_rejects_provider_url_with_query(monkeypatch):
 def test_gateway_app_exposes_connection_test_route():
     from src.leyra_gateway import app
 
-    paths = {route.path for route in app.routes}
+    # FastAPI 0.165 represents included routers lazily; OpenAPI exposes the
+    # effective mounted paths consistently across supported FastAPI versions.
+    paths = set(app.openapi()["paths"])
     assert "/leyra/health" in paths
     assert "/leyra/connection/test" in paths
     assert "/leyra/v1/models" in paths
