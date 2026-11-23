@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlsplit
 from urllib.request import Request, urlopen
 
 from .leyra_skills import activate_skill, discover_skills, read_skill_resource, skill_catalog
+from .openai_ads_conversions import AdsProviderError, AdsValidationError, validate_events, validate_remotely
 
 
 MAX_BODY = 2 * 1024 * 1024
@@ -200,7 +201,45 @@ class Handler(BaseHTTPRequestHandler):
         try:
             base, token, api_key, timeout = self.require_settings()
             auth(self, token)
-            if self.path != "/leyra/v1/chat/completions":
+            request_path = urlsplit(self.path).path
+            if request_path in {
+                "/leyra/integrations/ads/conversions/preview",
+                "/leyra/integrations/ads/conversions/validate",
+            }:
+                try:
+                    size = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    raise GatewayError(400, "Invalid Content-Length.")
+                if size <= 0 or size > MAX_BODY:
+                    raise GatewayError(413, "Request body must be between 1 byte and 2 MiB.")
+                raw = self.rfile.read(size)
+                try:
+                    payload = json.loads(raw.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    raise GatewayError(400, "Request body must be valid JSON.")
+                if not isinstance(payload, dict) or set(payload) != {"events"}:
+                    raise GatewayError(400, "Request body must contain only an events array.")
+                try:
+                    events = validate_events(payload["events"])
+                except AdsValidationError as exc:
+                    raise GatewayError(400, str(exc))
+                if request_path.endswith("/preview"):
+                    self.send_json(200, {
+                        "dry_run": True,
+                        "provider_contacted": False,
+                        "validate_only": True,
+                        "event_count": len(events),
+                    })
+                    return
+                try:
+                    result = validate_remotely(events, timeout=min(timeout, 30.0))
+                except AdsProviderError as exc:
+                    message = str(exc)
+                    status = 502 if ("reach" in message or "rejected" in message or "response exceeded" in message) else 503
+                    raise GatewayError(status, message)
+                self.send_json(200, result)
+                return
+            if request_path != "/leyra/v1/chat/completions":
                 raise GatewayError(404, "Not found.")
 
             try:
